@@ -73,6 +73,8 @@ fun SettingsScreen(onClose: () -> Unit) {
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     // 復元するファイルの中身（確認ダイアログのあとで使う）
     var pendingRestore by remember { mutableStateOf<String?>(null) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var update by remember { mutableStateOf<UpdateInfo?>(null) }
 
     LaunchedEffect(Unit) { savedBytes = repo.savedBytes() }
 
@@ -184,6 +186,24 @@ fun SettingsScreen(onClose: () -> Unit) {
                     danger = true,
                     onClick = { confirm = Confirm.DELETE_ALL },
                 )
+                // アプリ内アップデート（GitHub の Releases から）
+                if (Updater.enabled) {
+                    ActionRow(
+                        title = if (checkingUpdate) "確認中…" else "アップデートを確認",
+                        subtitle = "GitHub に新しい版があれば、ダウンロードしてインストールします",
+                        onClick = {
+                            if (!checkingUpdate) {
+                                checkingUpdate = true
+                                scope.launch {
+                                    runCatching { Updater.check() }
+                                        .onSuccess { found -> if (found != null) update = found else toast("最新の版です（${Updater.currentVersionName}）") }
+                                        .onFailure { toast("確認できませんでした（${it.message}）") }
+                                    checkingUpdate = false
+                                }
+                            }
+                        },
+                    )
+                }
                 val version = remember {
                     runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "—"
                 }
@@ -192,6 +212,8 @@ fun SettingsScreen(onClose: () -> Unit) {
             }
         }
     }
+
+    update?.let { UpdateDialog(it, onDismiss = { update = null }) }
 
     confirm?.let { c ->
         val (title, text, ok) = when (c) {

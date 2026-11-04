@@ -161,6 +161,19 @@ interface ChapterDao {
     @Query("UPDATE chapters SET isRead = 1 WHERE novelId = :novelId AND chapterId = :chapterId")
     suspend fun markRead(novelId: String, chapterId: String)
 
+    // 既読・未読をまとめて付け替える（目次の長押し・右上の「…」から）
+    @Query("UPDATE chapters SET isRead = :read WHERE novelId = :novelId AND chapterId = :chapterId")
+    suspend fun setRead(novelId: String, chapterId: String, read: Boolean)
+
+    @Query("UPDATE chapters SET isRead = :read WHERE novelId = :novelId AND `order` <= :order")
+    suspend fun setReadUpTo(novelId: String, order: Int, read: Boolean)
+
+    @Query("UPDATE chapters SET isRead = :read WHERE novelId = :novelId AND `order` >= :order")
+    suspend fun setReadFrom(novelId: String, order: Int, read: Boolean)
+
+    @Query("UPDATE chapters SET isRead = :read WHERE novelId = :novelId")
+    suspend fun setReadAll(novelId: String, read: Boolean)
+
     @Query("UPDATE chapters SET cached = :cached WHERE novelId = :novelId AND chapterId = :chapterId")
     suspend fun setCached(novelId: String, chapterId: String, cached: Boolean)
 

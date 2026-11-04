@@ -304,46 +304,35 @@ class LibraryRepository(
         chapterStore.deleteAll()
     }
 
-    // ------------------------------------------------ サンプル作品（M2 の動作確認用）
+    // ------------------------------------------------ 既読・未読の一括管理
 
-    /** 本棚が空なら、サンプル作品とカテゴリを入れる */
-    suspend fun ensureSampleData() {
-        if (db.novels().count() > 0) return
-        val fantasy = addCategory("ファンタジー")
-        addCategory("日常")
-        val now = System.currentTimeMillis()
-        SampleDocument.works.forEachIndexed { index, work ->
-            val novelId = NovelEntity.idOf("sample", work.workId)
-            val chapters = (0 until work.chapterCount).map { i ->
-                ChapterEntity(
-                    id = "$novelId/${i + 1}",
-                    novelId = novelId,
-                    chapterId = "${i + 1}",
-                    title = SampleDocument.chapterTitle(i),
-                    url = "https://example.com/${work.workId}/${i + 1}",
-                    order = i,
-                    sectionTitle = if (i < 3) "第一章" else "第二章",
-                )
-            }
-            db.chapters().insertAll(chapters)
-            chapters.forEachIndexed { i, ch ->
-                saveDocument(novelId, SampleDocument.create(work, i).copy(chapterId = ch.chapterId))
-            }
-            db.novels().upsert(
-                NovelEntity(
-                    id = novelId,
-                    siteId = "sample",
-                    workId = work.workId,
-                    title = work.title,
-                    author = work.author,
-                    sourceUrl = "https://example.com/${work.workId}",
-                    categoryId = if (index == 0) fantasy else null,
-                    addedAt = now - index * 60_000L,
-                    updatedAt = now - index * 3_600_000L,
-                    latestChapterTitle = chapters.last().title,
-                    lastChapterId = chapters.first().chapterId,
-                )
-            )
+    /** 既読・未読の付け方 */
+    enum class ReadMark { THIS_READ, THIS_UNREAD, UP_TO_READ, FROM_UNREAD, ALL_READ, ALL_UNREAD }
+
+    /** 既読・未読をまとめて付け替える。chapter は「この話」「ここまで」「ここから」の基準（すべてのときは null でよい） */
+    suspend fun setReadMark(novelId: String, chapter: ChapterEntity?, mark: ReadMark) {
+        val dao = db.chapters()
+        when (mark) {
+            ReadMark.THIS_READ -> chapter?.let { dao.setRead(novelId, it.chapterId, true) }
+            ReadMark.THIS_UNREAD -> chapter?.let { dao.setRead(novelId, it.chapterId, false) }
+            ReadMark.UP_TO_READ -> chapter?.let { dao.setReadUpTo(novelId, it.order, true) }
+            ReadMark.FROM_UNREAD -> chapter?.let { dao.setReadFrom(novelId, it.order, false) }
+            ReadMark.ALL_READ -> dao.setReadAll(novelId, true)
+            ReadMark.ALL_UNREAD -> dao.setReadAll(novelId, false)
         }
+    }
+
+    // ------------------------------------------------ サンプル作品の片付け
+
+    /**
+     * 開発中に入れていたサンプル作品と、そのとき作ったカテゴリ（ファンタジー・日常）を消す。
+     * カテゴリは、中に作品が残っていないときだけ消す（自分で作品を入れていたら残す）
+     */
+    suspend fun removeSampleData() {
+        db.novels().listAll().filter { it.siteId == "sample" }.forEach { deleteNovel(it.id) }
+        val used = db.novels().listAll().mapNotNull { it.categoryId }.toSet()
+        db.categories().list()
+            .filter { it.name in setOf("ファンタジー", "日常") && it.id !in used }
+            .forEach { db.categories().delete(it.id) }
     }
 }

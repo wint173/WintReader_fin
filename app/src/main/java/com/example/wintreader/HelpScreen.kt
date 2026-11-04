@@ -96,6 +96,8 @@ private val Guides = listOf(
         "目次の見かた",
         listOf(
             "まだ読んでいない話は太字、読み終えた話は薄い文字で表示し、右端に「未読」「既読」「読書中」と出ます。",
+            "話を長押しすると「ここまで既読にする」「ここから未読にする」「この話だけ既読（未読）にする」を選べます。ほかで読んだ作品を追加したときに便利です。",
+            "右上の縦の三点から、すべての話をまとめて既読・未読にできます。",
             "栞のある話には赤い「栞」の印が付きます。章の見出しがある作品は、章ごとに区切って表示します。",
             "右上の矢印の円で、目次を取り直して新しい話を確かめます（読書位置や既読の印はそのまま残ります）。",
             "元のサイトで消えた話は、保存してあれば「［元サイトで削除］」の印を付けて目次の最後に残します。",
@@ -170,6 +172,14 @@ private val Guides = listOf(
         ),
     ),
     Guide(
+        "アプリのアップデート",
+        listOf(
+            "GitHub に新しい版が出ると、アプリを開いたときに知らせます（半日に1回確かめます）。設定の「アップデートを確認」からも確かめられます。",
+            "「アップデート」を押すとダウンロードして、Android のインストール画面が開きます。本棚や設定はそのまま残ります。",
+            "初めてのときは「この提供元のアプリを許可」をオンにしてから、もう一度「インストール」を押してください。",
+        ),
+    ),
+    Guide(
         "本棚・栞を別の端末へ移す",
         listOf(
             "設定の「バックアップ」で、本棚・カテゴリ・既読の印・栞・読書位置をファイルに書き出せます。",
@@ -211,7 +221,7 @@ fun HelpScreen(onOpenSettings: () -> Unit) {
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
                     MeterCard("読書時間", formatReadingTime(stats.readingMillis), Modifier.weight(1f))
-                    MeterCard("本棚の作品", "${novels.count { it.siteId != "sample" }}作品", Modifier.weight(1f))
+                    MeterCard("本棚の作品", "${novels.size}作品", Modifier.weight(1f))
                     MeterCard("使った日", "${stats.usedDays}日", Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(8.dp))

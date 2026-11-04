@@ -59,12 +59,25 @@ fun AppRoot() {
     // ヘルプタブの右上から開く設定画面
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var ready by remember { mutableStateOf(false) }
+    // GitHub に新しい版があるとき（アプリ内アップデート）
+    var update by remember { mutableStateOf<UpdateInfo?>(null) }
+
+    // 起動したときに、半日に1回だけ新しい版を確かめる（失敗しても何も出さない）
+    LaunchedEffect(Unit) {
+        if (!Updater.enabled) return@LaunchedEffect
+        val store = container.settingsStore
+        if (System.currentTimeMillis() - store.lastUpdateCheck() < 12 * 60 * 60 * 1000L) return@LaunchedEffect
+        val found = runCatching { Updater.check() }.getOrNull()
+        store.markUpdateChecked()
+        if (found != null) update = found
+    }
+    update?.let { UpdateDialog(it, onDismiss = { update = null }) }
 
     LaunchedEffect(Unit) {
-        // サンプル作品は初めて起動したときだけ入れる（消したあとにまた入らないように）
-        if (!container.settingsStore.sampleInserted()) {
-            container.repository.ensureSampleData()
-            container.settingsStore.markSampleInserted()
+        // 開発中に入れていたサンプル作品とカテゴリを、一度だけ片付ける
+        if (!container.settingsStore.sampleRemoved()) {
+            runCatching { container.repository.removeSampleData() }
+            container.settingsStore.markSampleRemoved()
         }
         container.settingsStore.markUsedToday()
         ready = true
@@ -334,6 +347,7 @@ private fun ReaderRoute(novelId: String, onClose: () -> Unit, onOpenNovel: (Stri
                 }
             },
             onStopDownload = { downloadJob?.cancel() },
+            onMarkRead = { ch, mark -> scope.launch { repo.setReadMark(novelId, ch, mark) } },
             onRefresh = if (novel?.let { container.sites.adapterFor(it.siteId)?.canCheckUpdates } != true) null else suspend {
                 val added = runCatching { repo.refreshToc(novelId) }
                     .onFailure { Toast.makeText(context, "更新を確認できませんでした（${it.message}）", Toast.LENGTH_LONG).show() }

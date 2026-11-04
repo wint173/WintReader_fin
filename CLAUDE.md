@@ -58,6 +58,8 @@ M2以降：Room、DataStore、OkHttp、Jsoup、WorkManager。minSdk 29。
   - 4：本棚に「43/120話」と「未読N」（LIB-09。ChapterDao.observeStats）… 実装済み・実機確認待ち
   - 5：自動スクロール（READ-12。動いている間だけスクロール操作に切り替え、止めたら元の操作に戻す。速さ 1〜10 は毎秒約0.15〜4.2行）、本文内検索（READ-15。今の話だけ。Reader.search/showHit、
     .search-hit の帯は partialClone から除く）、外部ブラウザ（READ-23。アプリ内ブラウザの右上）… 実装済み・実機確認待ち
+  - 6：サンプル作品とカテゴリ（ファンタジー・日常）を初回起動時に一度だけ片付ける（removeSampleData）。
+    目次で既読・未読をまとめて付け替え（話の長押し：ここまで既読・ここから未読・この話だけ、右上「…」：すべて既読・未読）… 実装済み・実機確認待ち
   - 残り候補（P1）：LIB-08 一括操作、LIB-05 読了の印、UPD-06 消えた作品の表示、CACHE-09 改稿の取り直し、WEB-06 追加前の作品情報
 
 ## GitHub・配布
@@ -66,6 +68,9 @@ M2以降：Room、DataStore、OkHttp、Jsoup、WorkManager。minSdk 29。
   （最新版：releases/latest/download/WintReader.apk）。versionCode = 実行番号 + 1、versionName = 1.0.<実行番号>
 - 署名：PC は keystore.properties ＋ signing/wint.jks、GitHub は Secrets（SIGNING_KEYSTORE_BASE64 ほか3つ）。同じ鍵なので上書き更新できる。
   鍵ファイル・パスワードは .gitignore 済みで、絶対にコミットしない
+- アプリ内アップデート（Updater.kt）：GitHub API の releases/latest を見て、タグ build-<N> の N+1 が今の versionCode より大きければ
+  ダイアログを出す（起動時は半日に1回、設定からも確認可）。APK は cache/updates/ にダウンロードし、FileProvider（<applicationId>.updates）で
+  インストール画面へ渡す。リポジトリ名は CI の GITHUB_REPOSITORY を BuildConfig.GITHUB_REPO に入れる（PC ビルドでは空で、確認しない）
 - .github フォルダは Claude のファイル操作では書けない（保護されている）。ワークフローを直すときは ci/ に置いて移してもらう
 
 ## Claude 向けメモ

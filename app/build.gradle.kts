@@ -34,6 +34,10 @@ android {
         versionCode = ciRun?.plus(1) ?: 1
         versionName = if (ciRun != null) "1.0.$ciRun" else "1.0-dev"
 
+        // アプリ内のアップデート確認に使う GitHub のリポジトリ（「ユーザー名/リポジトリ名」）。
+        // GitHub Actions では自動で入る。PC でのビルドでは空（アップデート確認は出さない）
+        buildConfigField("String", "GITHUB_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: ""}\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -69,6 +73,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

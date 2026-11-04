@@ -252,4 +252,9 @@ object WIcons {
 
     /** 閉じる（×） */
     val Close = icon("close") { line { moveTo(6f, 6f); lineTo(18f, 18f); moveTo(18f, 6f); lineTo(6f, 18f) } }
+
+    /** その他の操作（縦の三点） */
+    val More = icon("more") {
+        solid { circle(12f, 5.5f, 1.8f); circle(12f, 12f, 1.8f); circle(12f, 18.5f, 1.8f) }
+    }
 }

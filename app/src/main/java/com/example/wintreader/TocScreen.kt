@@ -23,6 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -76,6 +78,8 @@ fun TocScreen(
     /** 全話を保存し始める・止める（サイトの作品のときだけ） */
     onDownload: (() -> Unit)? = null,
     onStopDownload: () -> Unit = {},
+    /** 既読・未読をまとめて付け替える（話の長押し・右上の「…」から） */
+    onMarkRead: ((ChapterEntity?, LibraryRepository.ReadMark) -> Unit)? = null,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf<BookmarkEntity?>(null) }
@@ -117,6 +121,25 @@ fun TocScreen(
                             contentDescription = if (download?.running == true) "保存を止める" else "全話を保存",
                             modifier = Modifier.size(24.dp),
                         )
+                    }
+                }
+                // すべての話の既読・未読をまとめて付け替える
+                if (onMarkRead != null) {
+                    var moreOpen by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { moreOpen = true }) {
+                            Icon(WIcons.More, contentDescription = "既読の管理", modifier = Modifier.size(24.dp))
+                        }
+                        DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("すべて既読にする") },
+                                onClick = { moreOpen = false; onMarkRead(null, LibraryRepository.ReadMark.ALL_READ) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("すべて未読にする") },
+                                onClick = { moreOpen = false; onMarkRead(null, LibraryRepository.ReadMark.ALL_UNREAD) },
+                            )
+                        }
                     }
                 }
             }
@@ -175,6 +198,7 @@ fun TocScreen(
                     currentChapterId = currentChapterId,
                     bookmarkedChapters = bookmarkedChapters,
                     onOpenChapter = onOpenChapter,
+                    onMarkRead = onMarkRead,
                 )
             } else {
                 if (bookmarks.isEmpty()) {
@@ -241,12 +265,14 @@ fun TocScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChapterList(
     chapters: List<ChapterEntity>,
     currentChapterId: String,
     bookmarkedChapters: Set<String>,
     onOpenChapter: (String) -> Unit,
+    onMarkRead: ((ChapterEntity?, LibraryRepository.ReadMark) -> Unit)?,
 ) {
     // 開いた時点で、今読んでいる話が見える位置までスクロールしておく
     val listState = rememberLazyListState()
@@ -271,13 +297,19 @@ private fun ChapterList(
                 )
             }
             val current = ch.chapterId == currentChapterId
+            // 長押しで、この話を基準に既読・未読を付け替える
+            var markMenu by remember { mutableStateOf(false) }
+            Box {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(if (current) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent)
-                    .clickable { onOpenChapter(ch.chapterId) }
+                    .combinedClickable(
+                        onClick = { onOpenChapter(ch.chapterId) },
+                        onLongClick = { if (onMarkRead != null) markMenu = true },
+                    )
                     .padding(horizontal = 16.dp, vertical = 14.dp),
             ) {
                 Text(
@@ -308,6 +340,26 @@ private fun ChapterList(
                     color = if (current || !ch.isRead) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.width(40.dp),
                 )
+            }
+            if (onMarkRead != null) {
+                DropdownMenu(expanded = markMenu, onDismissRequest = { markMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("ここまで既読にする") },
+                        onClick = { markMenu = false; onMarkRead(ch, LibraryRepository.ReadMark.UP_TO_READ) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("ここから未読にする") },
+                        onClick = { markMenu = false; onMarkRead(ch, LibraryRepository.ReadMark.FROM_UNREAD) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (ch.isRead) "この話だけ未読にする" else "この話だけ既読にする") },
+                        onClick = {
+                            markMenu = false
+                            onMarkRead(ch, if (ch.isRead) LibraryRepository.ReadMark.THIS_UNREAD else LibraryRepository.ReadMark.THIS_READ)
+                        },
+                    )
+                }
+            }
             }
             HorizontalDivider()
         }

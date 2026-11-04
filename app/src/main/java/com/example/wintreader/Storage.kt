@@ -133,7 +133,8 @@ class SettingsStore(private val context: Context) {
     private val keyReadingMillis = longPreferencesKey("reading_millis")
     private val keyUsedDays = intPreferencesKey("used_days")
     private val keyLastUsedDay = stringPreferencesKey("last_used_day")
-    private val keySampleInserted = booleanPreferencesKey("sample_inserted")
+    private val keySampleRemoved = booleanPreferencesKey("sample_removed")
+    private val keyLastUpdateCheck = longPreferencesKey("last_update_check")
     private val keyBunkoOrder = stringPreferencesKey("bunko_order")
     private val keyBunkoHidden = stringPreferencesKey("bunko_hidden")
 
@@ -227,20 +228,29 @@ class SettingsStore(private val context: Context) {
         }
     }
 
-    // ------------------------------------------------ サンプル作品
+    // ------------------------------------------------ アプリ内アップデート
 
-    /** サンプル作品を一度入れたか（消したあとにまた入らないようにする） */
-    suspend fun sampleInserted(): Boolean = context.settingsDataStore.data.map { it[keySampleInserted] ?: false }.first()
+    /** 前回アップデートを自動で確かめた時刻（ミリ秒） */
+    suspend fun lastUpdateCheck(): Long = context.settingsDataStore.data.map { it[keyLastUpdateCheck] ?: 0L }.first()
 
-    suspend fun markSampleInserted() {
-        context.settingsDataStore.edit { it[keySampleInserted] = true }
+    suspend fun markUpdateChecked() {
+        context.settingsDataStore.edit { it[keyLastUpdateCheck] = System.currentTimeMillis() }
     }
 
-    /** 設定をすべて消す（SET-07）。サンプル作品はもう入れない */
+    // ------------------------------------------------ サンプル作品の片付け
+
+    /** 開発中のサンプル作品を、もう片付けたか（一度だけ片付ける） */
+    suspend fun sampleRemoved(): Boolean = context.settingsDataStore.data.map { it[keySampleRemoved] ?: false }.first()
+
+    suspend fun markSampleRemoved() {
+        context.settingsDataStore.edit { it[keySampleRemoved] = true }
+    }
+
+    /** 設定をすべて消す（SET-07） */
     suspend fun clearAll() {
         context.settingsDataStore.edit { p ->
             p.clear()
-            p[keySampleInserted] = true
+            p[keySampleRemoved] = true
         }
     }
 
