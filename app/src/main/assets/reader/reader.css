@@ -1,0 +1,122 @@
+/*
+ * Wint Reader 本文表示用スタイル（横書き専用）
+ * 文字サイズ・余白・配色などは reader.js が CSS 変数で上書きする。
+ */
+:root {
+  --font-size: 18px;
+  --line-height: 1.8;
+  --pad-top: 24px;
+  --pad-bottom: 40px;
+  --pad-left: 20px;
+  --pad-right: 20px;
+  --bg: #ffffff;
+  --fg: #222222;
+  --font-family: sans-serif;
+  /* 画面サイズは reader.js が実測して px で入れる（WebView では vh/vw が 0 になることがあるため） */
+  --vw: 100vw;
+  --vh: 100vh;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-text-size-adjust: 100%;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#viewport {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+#content {
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  /* 禁則処理：行頭に句読点や閉じ括弧を置かない */
+  line-break: strict;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+
+/* ページ送りモード：1ページ = 1段（column）として横に並べる */
+body.paged #content {
+  position: absolute;
+  top: var(--pad-top);
+  left: var(--pad-left);
+  width: calc(var(--vw) - var(--pad-left) - var(--pad-right));
+  height: calc(var(--vh) - var(--pad-top) - var(--pad-bottom));
+  column-width: calc(var(--vw) - var(--pad-left) - var(--pad-right));
+  column-gap: calc(var(--pad-left) + var(--pad-right));
+  column-fill: auto;
+  will-change: transform;
+}
+
+/* スクロールモード：上下方向に連続表示 */
+body.scroll #viewport {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+body.scroll #content {
+  padding: var(--pad-top) var(--pad-right) var(--pad-bottom) var(--pad-left);
+}
+
+#content p {
+  margin: 0;
+  /* Web小説は字下げを本文側に含むことが多いので、CSSでは字下げしない */
+  text-indent: 0;
+}
+
+#content .blank {
+  height: calc(var(--font-size) * var(--line-height));
+}
+
+#content .title {
+  font-size: 1.15em;
+  font-weight: bold;
+  margin: 0 0 1em 0;
+}
+
+#content ruby rt {
+  font-size: 0.5em;
+}
+
+#content .em {
+  text-emphasis: filled sesame;
+  -webkit-text-emphasis: filled sesame;
+  text-emphasis-position: over right;
+  -webkit-text-emphasis-position: over;
+}
+
+#content figure {
+  margin: 0.5em 0;
+  break-inside: avoid;
+  text-align: center;
+}
+
+#content figure img {
+  max-width: 100%;
+  max-height: calc(var(--vh) - var(--pad-top) - var(--pad-bottom) - 1em);
+  object-fit: contain;
+}
+
+#content hr {
+  border: none;
+  border-top: 1px solid currentColor;
+  opacity: 0.4;
+  margin: 1em 20%;
+}
+
+/* 最終ページの判定に使う目印 */
+#end-marker {
+  display: block;
+  height: 1px;
+}
