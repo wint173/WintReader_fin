@@ -41,14 +41,21 @@ class HamelnAdapter(private val http: SiteHttp) : SiteAdapter {
 
     override suspend fun fetchWork(ref: WorkRef): FetchedWork {
         val doc = Jsoup.parse(http.get(ref.workUrl), ref.workUrl)
-        // 作者の欄の中にも span[itemprop=name] があるので、作者の欄の外のものを使う
+        // 作者の欄の中にも span[itemprop=name] があるので、作者の欄の外のものを使う。
+        // 一話だけの短編のページには作品名の欄がないので、ページのタイトル（「作品名 - 話のタイトル - ハーメルン」）から取る
         val title = doc.select("span[itemprop=name]")
             .firstOrNull { el -> el.parents().none { it.attr("itemprop") == "author" } }
-            ?.text()?.trim()
+            ?.text()?.trim()?.ifEmpty { null }
+            ?: titleFromPageTitle(doc)
             ?: throw IllegalStateException(
                 "作品名が見つかりません。年齢確認が必要な作品は、アプリ内ブラウザで作品ページを開いて確認を済ませてから追加してください"
             )
-        val author = doc.selectFirst("span[itemprop=author]")?.text()?.trim() ?: ""
+        // 作者：作者の欄、なければ「作：」の後ろの作者ページへのリンク
+        val author = doc.selectFirst("span[itemprop=author]")?.text()?.trim()?.ifEmpty { null }
+            ?: doc.select("a[href*=/user/]").firstOrNull { a ->
+                (a.previousSibling() as? org.jsoup.nodes.TextNode)?.text()?.trimEnd()?.endsWith("作：") == true
+            }?.text()?.trim()
+            ?: ""
         val summary = doc.select("#maind > div.ss").getOrNull(1)?.wholeText()?.trim() ?: "" // PC 向けのページのみ
 
         val chapters = mutableListOf<FetchedChapter>()
@@ -88,6 +95,17 @@ class HamelnAdapter(private val http: SiteHttp) : SiteAdapter {
         }
         if (chapters.isEmpty()) throw IllegalStateException("公開されている話がありません")
         return FetchedWork(ref.siteId, ref.workId, title, author, summary, ref.workUrl, chapters)
+    }
+
+    /** ページのタイトル（og:title か title）「作品名 - 話のタイトル - ハーメルン」から作品名を取る */
+    private fun titleFromPageTitle(doc: org.jsoup.nodes.Document): String? {
+        val raw = doc.selectFirst("meta[property=og:title]")?.attr("content")?.ifBlank { null } ?: doc.title()
+        val parts = raw.trim().split(" - ").toMutableList()
+        if (parts.lastOrNull()?.trim()?.startsWith("ハーメルン") == true) parts.removeAt(parts.lastIndex)
+        // 残りが2つ以上なら、最後は話のタイトル（短編では空白だけ）
+        if (parts.size >= 2) parts.removeAt(parts.lastIndex)
+        val name = parts.joinToString(" - ").trim()
+        return name.ifEmpty { null }
     }
 
     // ------------------------------------------------ 本文
