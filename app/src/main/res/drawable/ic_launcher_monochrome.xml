@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- テーマに合わせたアイコン（Android 13 以降）用。色は端末が付けるので、線と栞の形だけを描く -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#000000"
+        android:pathData="M58,74 L65,74 L65,84 L61.5,80.8 L58,84 Z" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="3.4"
+        android:strokeLineJoin="round"
+        android:strokeLineCap="round"
+        android:pathData="M54,38 Q44,32 28,34 L28,72 Q44,70 54,76 Z M54,38 Q64,32 80,34 L80,72 Q64,70 54,76 M54,38 L54,76" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="3.4"
+        android:strokeLineCap="round"
+        android:pathData="M34,46 Q41,45 48,47 M34,54 Q41,53 48,55 M34,62 Q38,61.5 42,62 M60,47 Q67,45 74,46 M60,55 Q67,53 74,54 M60,63 Q64,62 68,62" />
+</vector>
