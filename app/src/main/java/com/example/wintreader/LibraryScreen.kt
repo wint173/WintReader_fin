@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,6 +31,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -137,6 +139,8 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
     val statsList by statsFlow.collectAsState(initial = emptyList())
     val stats = remember(statsList) { statsList.associateBy { it.novelId } }
     val librarySort by container.settingsStore.librarySort.collectAsState(initial = SortMode.RECENT)
+    val fullTitlesFlow = remember { container.settingsStore.libraryFullTitles }
+    val fullTitles by fullTitlesFlow.collectAsState(initial = false)
 
     var query by remember { mutableStateOf("") }
     var dialog by remember { mutableStateOf<LibraryDialog?>(null) }
@@ -156,6 +160,15 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
             // 上の余白は外側の Scaffold が付けるので、ここでは付けない
             windowInsets = WindowInsets(0, 0, 0, 0),
             actions = {
+                // 長い作品名を全部表示するか（1行で省略するか）を切り替える
+                IconButton(onClick = { scope.launch { container.settingsStore.saveLibraryFullTitles(!fullTitles) } }) {
+                    Icon(
+                        if (fullTitles) WIcons.TitleWrap else WIcons.TitleOneLine,
+                        contentDescription = if (fullTitles) "作品名を1行にまとめる" else "作品名を全部表示する",
+                        tint = if (fullTitles) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
                 TextButton(onClick = { dialog = LibraryDialog.AddCategory }) { Text("＋カテゴリ") }
                 Box {
                     TextButton(onClick = { sortMenu = true }) { Text(librarySort.label) }
@@ -218,6 +231,7 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
                         NovelRow(
                             novel = novel,
                             stats = stats[novel.id],
+                            fullTitle = fullTitles,
                             indent = true,
                             onOpen = { onOpenNovel(novel.id) },
                             onMove = { dialog = LibraryDialog.MoveNovel(novel) },
@@ -233,6 +247,7 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
                 NovelRow(
                     novel = novel,
                     stats = stats[novel.id],
+                    fullTitle = fullTitles,
                     indent = false,
                     onOpen = { onOpenNovel(novel.id) },
                     onMove = { dialog = LibraryDialog.MoveNovel(novel) },
@@ -405,6 +420,8 @@ private fun CategoryHeader(
 private fun NovelRow(
     novel: NovelEntity,
     stats: ChapterStats?,
+    /** 長い作品名を折り返して全部出すか */
+    fullTitle: Boolean,
     indent: Boolean,
     onOpen: () -> Unit,
     onMove: () -> Unit,
@@ -422,10 +439,11 @@ private fun NovelRow(
     val scope = rememberCoroutineScope()
     var checking by remember { mutableStateOf(false) }
 
+    // 作品名を全部出すときは行の高さが変わるので、高さは中身に合わせる（最低 76dp）
     Box(
         Modifier
             .fillMaxWidth()
-            .height(76.dp),
+            .heightIn(min = 76.dp),
     ) {
         // 右へずらすと左から見える「更新確認」（十分ずらすと濃くなる）
         if (offset.value > 0f) {
@@ -433,7 +451,7 @@ private fun NovelRow(
             Box(
                 contentAlignment = Alignment.CenterStart,
                 modifier = Modifier
-                    .fillMaxSize()
+                    .matchParentSize()
                     .background(
                         if (ready) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
@@ -452,9 +470,9 @@ private fun NovelRow(
         }
 
         // 下に隠れている操作ボタン（右端）
+        Box(Modifier.matchParentSize(), contentAlignment = Alignment.CenterEnd) {
         Row(
             modifier = Modifier
-                .align(Alignment.CenterEnd)
                 .width(actionWidth)
                 .fillMaxHeight(),
         ) {
@@ -481,11 +499,13 @@ private fun NovelRow(
                 contentAlignment = Alignment.Center,
             ) { Text("削除", color = Color.White) }
         }
+        }
 
         // 作品の情報（左へずらすと、下の操作ボタンが見える）
         Surface(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
+                .heightIn(min = 76.dp)
                 .offset { IntOffset(offset.value.roundToInt(), 0) }
                 .draggable(
                     orientation = Orientation.Horizontal,
@@ -517,13 +537,14 @@ private fun NovelRow(
             Column(
                 verticalArrangement = Arrangement.Center,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(start = if (indent) 32.dp else 16.dp, end = 16.dp),
+                    .fillMaxWidth()
+                    .heightIn(min = 76.dp)
+                    .padding(start = if (indent) 32.dp else 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
             ) {
                 Text(
                     novel.title,
                     style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
+                    maxLines = if (fullTitle) Int.MAX_VALUE else 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))

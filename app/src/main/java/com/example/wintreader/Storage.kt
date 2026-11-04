@@ -154,6 +154,14 @@ class SettingsStore(private val context: Context) {
 
     // 本棚の未分類作品の並び順（LIB-20〜23）。カテゴリ内の並び順はカテゴリごとに持つ
     private val keyLibrarySort = stringPreferencesKey("library_sort")
+    private val keyLibraryFullTitles = booleanPreferencesKey("library_full_titles")
+
+    /** 本棚で長い作品名を折り返して全部表示するか */
+    val libraryFullTitles: Flow<Boolean> = context.settingsDataStore.data.map { it[keyLibraryFullTitles] ?: false }
+
+    suspend fun saveLibraryFullTitles(on: Boolean) {
+        context.settingsDataStore.edit { it[keyLibraryFullTitles] = on }
+    }
 
     val librarySort: Flow<SortMode> = context.settingsDataStore.data.map { p ->
         p[keyLibrarySort]?.let { runCatching { SortMode.valueOf(it) }.getOrNull() } ?: SortMode.RECENT

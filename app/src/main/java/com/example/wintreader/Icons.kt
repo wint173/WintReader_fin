@@ -257,4 +257,13 @@ object WIcons {
     val More = icon("more") {
         solid { circle(12f, 5.5f, 1.8f); circle(12f, 12f, 1.8f); circle(12f, 18.5f, 1.8f) }
     }
+
+    /** 本棚の作品名：1行で省略（1本の線と「…」）・全部表示（折り返した3本の線） */
+    val TitleOneLine = icon("title_one_line") {
+        line { moveTo(3f, 12f); lineTo(14f, 12f) }
+        solid { circle(17f, 12f, 1.2f); circle(20.5f, 12f, 1.2f) }
+    }
+    val TitleWrap = icon("title_wrap") {
+        line { moveTo(3f, 6f); lineTo(21f, 6f); moveTo(3f, 12f); lineTo(21f, 12f); moveTo(3f, 18f); lineTo(14f, 18f) }
+    }
 }
