@@ -229,3 +229,48 @@ body.scroll .page-content {
   background: color-mix(in srgb, var(--bg), #808080 10%);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.16);
 }
+
+/* ---------------------------------------------------------------- 話の切り替えの案内 */
+/* 本文をずらして空いた所に、矢印と移る先の話のタイトルを本文の色で薄く書く */
+
+#edge-ind {
+  position: fixed;
+  left: 0;
+  top: 0;
+  color: var(--fg);
+  font-family: var(--font-family);
+  pointer-events: none;
+  opacity: 0;
+  z-index: 5;
+  box-sizing: border-box;
+  text-align: center;
+}
+#edge-ind .edge-arrow {
+  font-size: 22px;
+  line-height: 1.2;
+  opacity: 0.35;
+  transition: opacity 150ms, transform 150ms;
+}
+#edge-ind .edge-title {
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.4;
+  transition: opacity 150ms;
+  overflow: hidden;
+}
+#edge-ind.vertical {
+  padding: 12px 24px;
+}
+#edge-ind.vertical .edge-title {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#edge-ind.horizontal .edge-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+}
+/* 十分に引っ張ったとき：はっきり見せる */
+#edge-ind.ready .edge-arrow { opacity: 0.9; transform: scale(1.15); }
+#edge-ind.ready .edge-title { opacity: 0.85; }

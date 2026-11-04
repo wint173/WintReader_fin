@@ -14,6 +14,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.nullable
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
 /**
@@ -72,8 +75,21 @@ class ReaderController {
         exec("Reader.load($docJson, $setJson, $posJson)")
     }
 
+    /** WebView を作り直さずに話を切り替える。direction：1 = 次の話、-1 = 前の話、0 = その他 */
+    fun switchChapter(doc: NovelDocument, position: ReadingPosition?, direction: Int) {
+        val docJson = ReaderJson.encodeToString(NovelDocument.serializer(), doc)
+        val posJson = position?.let { ReaderJson.encodeToString(ReadingPosition.serializer(), it) } ?: "null"
+        exec("Reader.switchChapter($docJson, $posJson, $direction)")
+    }
+
     fun applySettings(settings: ReaderSettings) {
         exec("Reader.applySettings(${ReaderJson.encodeToString(ReaderSettings.serializer(), settings)})")
+    }
+
+    /** 話の端で「次の話へ：○○」と案内するためのタイトル（null = その方向に話がない） */
+    fun setEdgeLabels(prev: String?, next: String?) {
+        val ser = String.serializer().nullable
+        exec("window.Reader && Reader.setEdgeLabels(${ReaderJson.encodeToString(ser, prev)}, ${ReaderJson.encodeToString(ser, next)})")
     }
 
     fun setMode(mode: ReadingMode) {
@@ -84,6 +100,21 @@ class ReaderController {
     fun prev() = exec("Reader.prev()")
     fun goToPage(index: Int) = exec("Reader.goToPage($index)")
     fun goToPosition(pos: ReadingPosition) = exec("Reader.goToPosition(${pos.block}, ${pos.offset})")
+
+    /** 本文内の位置がそれぞれ何ページ目（0始まり）にあるかを調べる。結果は onResult に返す */
+    fun pagesOf(positions: List<ReadingPosition>, onResult: (List<Int>) -> Unit) {
+        val view = webView ?: return
+        if (positions.isEmpty()) { onResult(emptyList()); return }
+        val arg = ReaderJson.encodeToString(ListSerializer(ReadingPosition.serializer()), positions)
+        view.evaluateJavascript("(window.Reader && Reader.pagesOf($arg)) || null") { raw ->
+            // 戻り値は「JSON 文字列を JSON にしたもの」なので2回読む
+            val pages = runCatching {
+                val inner = ReaderJson.decodeFromString(String.serializer(), raw)
+                ReaderJson.decodeFromString(ListSerializer(Int.serializer()), inner)
+            }.getOrNull()
+            if (pages != null && pages.size == positions.size) onResult(pages)
+        }
+    }
 }
 
 /** reader.js からの通知を受け取る。JavaScript のスレッドから呼ばれるのでメインスレッドへ渡す */

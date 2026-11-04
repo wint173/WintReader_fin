@@ -60,3 +60,33 @@ data class ReadingPosition(
     val block: Int = 0,
     val offset: Int = 0,
 )
+
+/** 段落の文字（ルビは親文字だけ）。読書位置の文字の数え方と同じ */
+fun ContentBlock.plainText(): String = when (this) {
+    is ContentBlock.Paragraph -> spans.joinToString("") {
+        when (it) {
+            is TextSpan.Plain -> it.text
+            is TextSpan.Ruby -> it.base
+            is TextSpan.Emphasis -> it.text
+        }
+    }
+    else -> ""
+}
+
+/** 位置 pos から始まる本文の書き出し（栞の一覧に表示する） */
+fun NovelDocument.excerptAt(pos: ReadingPosition, length: Int = 40): String {
+    val sb = StringBuilder()
+    var i = pos.block.coerceIn(0, (blocks.size - 1).coerceAtLeast(0))
+    var offset = pos.offset.coerceAtLeast(0)
+    while (i < blocks.size && sb.length < length) {
+        val text = blocks[i].plainText()
+        if (offset < text.length) sb.append(text, offset, text.length)
+        offset = 0
+        i++
+    }
+    return sb.take(length).toString().trim()
+}
+
+/** 話の最後のページを開くための位置（文字位置は reader.js が段落の長さに収める） */
+fun NovelDocument.endPosition(): ReadingPosition =
+    ReadingPosition(block = (blocks.size - 1).coerceAtLeast(0), offset = Int.MAX_VALUE / 2)
