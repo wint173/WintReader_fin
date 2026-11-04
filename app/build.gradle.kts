@@ -20,6 +20,15 @@ fun signingValue(key: String, env: String): String? =
 // GitHub Actions の実行番号（ないときは PC でのビルド）
 val ciRun: Int? = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
 
+// アプリ内アップデートで見る GitHub のリポジトリ（「ユーザー名/リポジトリ名」）。
+// GitHub Actions では GITHUB_REPOSITORY から、PC では .git/config の origin の URL から読む
+val githubRepo: String = System.getenv("GITHUB_REPOSITORY")?.takeIf { it.isNotBlank() } ?: run {
+    val config = rootProject.file(".git/config")
+    if (!config.exists()) return@run ""
+    val url = Regex("""\[remote "origin"][^\[]*?url\s*=\s*(\S+)""").find(config.readText())?.groupValues?.get(1) ?: return@run ""
+    Regex("""github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$""").find(url)?.groupValues?.get(1) ?: ""
+}
+
 android {
     namespace = "com.example.wintreader"
     compileSdk {
@@ -34,9 +43,8 @@ android {
         versionCode = ciRun?.plus(1) ?: 1
         versionName = if (ciRun != null) "1.0.$ciRun" else "1.0-dev"
 
-        // アプリ内のアップデート確認に使う GitHub のリポジトリ（「ユーザー名/リポジトリ名」）。
-        // GitHub Actions では自動で入る。PC でのビルドでは空（アップデート確認は出さない）
-        buildConfigField("String", "GITHUB_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: ""}\"")
+        // アプリ内のアップデート確認に使う GitHub のリポジトリ（上の githubRepo）
+        buildConfigField("String", "GITHUB_REPO", "\"$githubRepo\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

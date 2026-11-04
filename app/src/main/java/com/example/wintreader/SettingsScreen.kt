@@ -187,12 +187,13 @@ fun SettingsScreen(onClose: () -> Unit) {
                     onClick = { confirm = Confirm.DELETE_ALL },
                 )
                 // アプリ内アップデート（GitHub の Releases から）
-                if (Updater.enabled) {
+                run {
                     ActionRow(
                         title = if (checkingUpdate) "確認中…" else "アップデートを確認",
-                        subtitle = "GitHub に新しい版があれば、ダウンロードしてインストールします",
+                        subtitle = if (Updater.enabled) "GitHub に新しい版があれば、ダウンロードしてインストールします（今の版：${Updater.currentVersionName}）"
+                        else "この版は GitHub のリポジトリが分からないため確認できません。GitHub の Releases から入れた版で使えます",
                         onClick = {
-                            if (!checkingUpdate) {
+                            if (Updater.enabled && !checkingUpdate) {
                                 checkingUpdate = true
                                 scope.launch {
                                     runCatching { Updater.check() }

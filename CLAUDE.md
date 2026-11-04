@@ -70,7 +70,8 @@ M2以降：Room、DataStore、OkHttp、Jsoup、WorkManager。minSdk 29。
   鍵ファイル・パスワードは .gitignore 済みで、絶対にコミットしない
 - アプリ内アップデート（Updater.kt）：GitHub API の releases/latest を見て、タグ build-<N> の N+1 が今の versionCode より大きければ
   ダイアログを出す（起動時は半日に1回、設定からも確認可）。APK は cache/updates/ にダウンロードし、FileProvider（<applicationId>.updates）で
-  インストール画面へ渡す。リポジトリ名は CI の GITHUB_REPOSITORY を BuildConfig.GITHUB_REPO に入れる（PC ビルドでは空で、確認しない）
+  インストール画面へ渡す。リポジトリ名は BuildConfig.GITHUB_REPO（CI は GITHUB_REPOSITORY、PC は .git/config の origin から読む。分からなければ空で確認しない）。
+  PC ビルドは versionCode 1 なので、GitHub の版があれば必ず「新しい版」と出る（同じ鍵なので、そのまま GitHub の版に移れる）
 - .github フォルダは Claude のファイル操作では書けない（保護されている）。ワークフローを直すときは ci/ に置いて移してもらう
 
 ## Claude 向けメモ
