@@ -16,8 +16,12 @@ import androidx.webkit.WebViewAssetLoader
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/** 操作モード（READ-30）。スワイプは今後追加する */
-enum class ReadingMode(val jsName: String) { PAGED("paged"), SCROLL("scroll") }
+/**
+ * 操作モード（READ-30）。
+ * TAP：タップでページ送り / SWIPE：指に合わせてめくる（タップでも送れる）/ SCROLL：上下スクロール
+ * TAP と SWIPE は reader.js 側では同じページ表示で、スワイプを受け付けるかだけが違う
+ */
+enum class ReadingMode(val jsName: String) { TAP("paged"), SWIPE("paged"), SCROLL("scroll") }
 
 /** タップした場所（14.3 の決定：判定は Kotlin 側で行う） */
 enum class TapZone { LEFT, CENTER, RIGHT }
@@ -34,6 +38,8 @@ data class ReaderSettings(
     val bg: String = "#ffffff",
     val fg: String = "#222222",
     val fontFamily: String = "sans-serif",
+    /** ページめくりのアニメーション（READ-13）："fold"（折り返し）| "slide" | "none" */
+    val animation: String = "fold",
 )
 
 /** 背景色プリセット（UI-03：6種類） */
@@ -70,7 +76,10 @@ class ReaderController {
         exec("Reader.applySettings(${ReaderJson.encodeToString(ReaderSettings.serializer(), settings)})")
     }
 
-    fun setMode(mode: ReadingMode) = exec("Reader.setMode('${mode.jsName}')")
+    fun setMode(mode: ReadingMode) {
+        exec("Reader.setMode('${mode.jsName}')")
+        exec("Reader.setSwipeEnabled(${mode == ReadingMode.SWIPE})")
+    }
     fun next() = exec("Reader.next()")
     fun prev() = exec("Reader.prev()")
     fun goToPage(index: Int) = exec("Reader.goToPage($index)")
@@ -177,9 +186,10 @@ fun createReaderWebView(
 
     webView.setOnTouchListener { _, event ->
         detector.onTouchEvent(event)
-        // ページ送りモード：WebView にタッチを渡さない（勝手にスクロールさせない）
+        // タップモード：WebView にタッチを渡さない（勝手にスクロールさせない）
         // スクロールモード：WebView にも渡してスクロールさせる
-        currentMode() == ReadingMode.PAGED
+        // スワイプモード：指の動きは reader.js が追いかけるので WebView にも渡す（タップの判定はここで行う）
+        currentMode() == ReadingMode.TAP
     }
 
     webView.loadUrl(READER_URL)

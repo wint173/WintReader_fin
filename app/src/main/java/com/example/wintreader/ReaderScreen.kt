@@ -75,7 +75,7 @@ fun ReaderScreen(document: NovelDocument) {
     val chapterKey = "${document.workId}/${document.chapterId}"
 
     var settings by remember { mutableStateOf(ReaderSettings()) }
-    var mode by remember { mutableStateOf(ReadingMode.PAGED) }
+    var mode by remember { mutableStateOf(ReadingMode.TAP) }
     var page by remember { mutableIntStateOf(1) }
     var totalPages by remember { mutableIntStateOf(1) }
     var menuVisible by remember { mutableStateOf(false) }
@@ -208,7 +208,7 @@ private fun SettingsPanel(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             // ページ位置スライダー（UI-08）
-            if (mode == ReadingMode.PAGED && totalPages > 1) {
+            if (mode != ReadingMode.SCROLL && totalPages > 1) {
                 var sliderValue by remember(page) { mutableFloatStateOf(page.toFloat()) }
                 Text("ページ ${sliderValue.toInt()} / $totalPages", style = MaterialTheme.typography.labelMedium)
                 Slider(
@@ -234,16 +234,17 @@ private fun SettingsPanel(
 
             Spacer(Modifier.size(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = mode == ReadingMode.PAGED,
-                    onClick = { onModeChange(ReadingMode.PAGED) },
-                    label = { Text("ページ送り") },
-                )
-                FilterChip(
-                    selected = mode == ReadingMode.SCROLL,
-                    onClick = { onModeChange(ReadingMode.SCROLL) },
-                    label = { Text("スクロール") },
-                )
+                listOf(
+                    ReadingMode.TAP to "タップ",
+                    ReadingMode.SWIPE to "スワイプ",
+                    ReadingMode.SCROLL to "スクロール",
+                ).forEach { (m, label) ->
+                    FilterChip(
+                        selected = mode == m,
+                        onClick = { onModeChange(m) },
+                        label = { Text(label) },
+                    )
+                }
             }
 
             Spacer(Modifier.size(8.dp))
@@ -258,6 +259,18 @@ private fun SettingsPanel(
                     onClick = { onTapDirectionChange(false) },
                     label = { Text("右タップで次へ") },
                 )
+            }
+
+            Spacer(Modifier.size(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("めくり", modifier = Modifier.align(Alignment.CenterVertically))
+                listOf("fold" to "折り返し", "slide" to "スライド", "none" to "なし").forEach { (key, label) ->
+                    FilterChip(
+                        selected = settings.animation == key,
+                        onClick = { onSettingsChange(settings.copy(animation = key)) },
+                        label = { Text(label) },
+                    )
+                }
             }
 
             Spacer(Modifier.size(8.dp))
