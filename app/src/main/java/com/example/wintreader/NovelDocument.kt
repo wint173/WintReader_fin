@@ -14,6 +14,8 @@ data class NovelDocument(
     val chapterId: String,
     val title: String,
     val blocks: List<ContentBlock>,
+    /** 本文の言語（"en" など）。null なら日本語として扱う（reader.js が英文かどうかを見分ける） */
+    val lang: String? = null,
 )
 
 @Serializable

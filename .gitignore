@@ -13,3 +13,13 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 署名の鍵（公開リポジトリには絶対に入れない）
+/signing/
+keystore.properties
+*.jks
+*.keystore
+
+# Kotlin・IDE の作業ファイル
+.kotlin/
+/.idea/

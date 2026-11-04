@@ -112,6 +112,13 @@ body.scroll .page-content {
   object-fit: contain;
 }
 
+/* 挿絵を表示しない設定のときの印 */
+.page-content .img-hidden {
+  font-size: 0.8em;
+  opacity: 0.5;
+  text-align: center;
+}
+
 .page-content hr {
   border: none;
   border-top: 1px solid currentColor;
@@ -274,3 +281,42 @@ body.scroll .page-content {
 /* 十分に引っ張ったとき：はっきり見せる */
 #edge-ind.ready .edge-arrow { opacity: 0.9; transform: scale(1.15); }
 #edge-ind.ready .edge-title { opacity: 0.85; }
+
+/* 動作（更新を確認・作品のページ）の案内：2行（最終話／動作の名前） */
+#edge-ind .edge-title { white-space: pre-line; }
+#edge-ind.action .edge-arrow { font-size: 24px; }
+
+/* 動作の途中経過・結果（「確認中…」「新しい話はありません」） */
+#edge-ind.notice .edge-arrow { opacity: 0.5; transform: none; }
+#edge-ind.notice .edge-title { opacity: 0.7; }
+
+/* 英文（Project Gutenberg など）：両端揃えにし、単語の途中ではハイフンで区切る。
+   段落の間に空行がないので、2段落目からは字下げで段落を見分ける */
+.page-content.latin {
+  font-family: "Noto Serif", Georgia, "Times New Roman", serif;
+  text-align: justify;
+  -webkit-hyphens: auto;
+  hyphens: auto;
+  line-break: auto;
+  word-break: normal;
+  overflow-wrap: break-word;
+  letter-spacing: normal;
+}
+.page-content.latin p {
+  text-indent: 1.5em;
+}
+.page-content.latin .title,
+.page-content.latin p:first-of-type {
+  text-indent: 0;
+}
+
+/* 本文内検索で見つけた所（本文の上に重ねる薄い帯） */
+.search-hit {
+  position: absolute;
+  background: rgba(255, 200, 0, 0.38);
+  border-radius: 2px;
+  pointer-events: none;
+}
+body.scroll .page-content {
+  position: relative;
+}

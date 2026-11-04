@@ -39,7 +39,8 @@
     bg: "#ffffff",
     fg: "#222222",
     fontFamily: "sans-serif",
-    animation: "slide"   // "slide" | "fold" | "none"
+    animation: "slide",  // "slide" | "fold" | "none"
+    showImages: true     // 挿絵を表示するか
   };
 
   var ANIMATION_MS = 220;
@@ -68,6 +69,11 @@
     state.blocks = [];
     state.textCache = [];
 
+    // 英文などは、両端揃え・単語の途中でのハイフン区切り・欧文の書体で組む（.latin）
+    var latin = isLatinDoc(doc);
+    content.classList.toggle("latin", latin);
+    content.setAttribute("lang", latin ? (doc.lang && !/^ja/i.test(doc.lang) ? doc.lang : "en") : "ja");
+
     if (doc.title) {
       var h = document.createElement("div");
       h.className = "title";
@@ -84,6 +90,13 @@
           if (!el.firstChild) el.appendChild(document.createElement("br"));
           break;
         case "img":
+          if (state.settings.showImages === false) {
+            // 挿絵を表示しない設定：読書位置の番号がずれないよう、小さな印だけ置く
+            el = document.createElement("div");
+            el.className = "img-hidden";
+            el.textContent = "［挿絵］";
+            break;
+          }
           el = document.createElement("figure");
           var img = document.createElement("img");
           img.src = b.uri;
@@ -108,6 +121,25 @@
     var marker = document.createElement("span");
     marker.id = "end-marker";
     content.appendChild(marker);
+  }
+
+  // 本文の言語。doc.lang があればそれに従い、なければ本文の頭の文字で見分ける（アルファベットが半分を超えたら英文）
+  function isLatinDoc(doc) {
+    if (doc.lang) return !/^ja/i.test(doc.lang);
+    var letters = 0, total = 0;
+    var blocks = doc.blocks || [];
+    for (var i = 0; i < blocks.length && total < 3000; i++) {
+      (blocks[i].spans || []).forEach(function (sp) {
+        var t = sp.text || sp.base || "";
+        for (var k = 0; k < t.length && total < 3000; k++) {
+          var c = t.charCodeAt(k);
+          if (c <= 32 || c === 0x3000) continue;
+          total++;
+          if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122)) letters++;
+        }
+      });
+    }
+    return total > 40 && letters / total > 0.5;
   }
 
   function renderSpan(s) {
@@ -366,28 +398,76 @@
     shadeFlap = makeDiv("fold-shade fold-shade-flap", flapClip.page);
   }
 
-  function cloneContent() {
-    var c = content.cloneNode(true);
-    c.removeAttribute("id");
-    var marks = c.querySelectorAll("[id]");
-    for (var i = 0; i < marks.length; i++) marks[i].removeAttribute("id");
-    c.style.transition = "none";
-    return c;
+  // めくりに使う本文の複製は、めくる2ページの分だけ作る（長い話で本文全体を複製すると重いため。長文対応）。
+  // 複製の最初の段落が元と同じ高さから始まるよう、上に空きを入れる。そうすれば段組みの区切りも元と同じになる。
+  // 戻り値の base は「複製の0ページ目が元の何ページ目か」
+  function firstRectOf(el) {
+    var rs = el.getClientRects();
+    return rs.length ? rs[0] : el.getBoundingClientRect();
+  }
+  function lastRectOf(el) {
+    var rs = el.getClientRects();
+    return rs.length ? rs[rs.length - 1] : el.getBoundingClientRect();
   }
 
-  // 本文が変わったら複製を作り直す
+  function partialClone(low, high) {
+    // 検索の印（.search-hit）は本文ではないので除く
+    var kids = Array.prototype.filter.call(content.children, function (el) { return !el.classList.contains("search-hit"); });
+    var n = kids.length;
+    // 始まり：low ページの頭を含む部品（終わりが low ページ以降にある最初の部品）
+    var lo = 0, hi = n - 1, from = n - 1;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (pageOfX(lastRectOf(kids[mid]).left + 1) >= low) { from = mid; hi = mid - 1; } else lo = mid + 1;
+    }
+    // 終わり：high ページより後から始まる最初の部品の手前
+    lo = from; hi = n - 1; var to = n - 1;
+    while (lo <= hi) {
+      var m2 = (lo + hi) >> 1;
+      if (pageOfX(firstRectOf(kids[m2]).left + 1) > high) { to = m2 - 1; hi = m2 - 1; } else lo = m2 + 1;
+    }
+    to = Math.max(from, to);
+
+    var c = content.cloneNode(false);
+    c.removeAttribute("id");
+    c.style.transition = "none";
+    var first = firstRectOf(kids[from]);
+    var base = from === 0 ? 0 : pageOfX(first.left + 1);
+    if (from > 0) {
+      var top = content.getBoundingClientRect().top;
+      var mt = parseFloat(getComputedStyle(kids[from]).marginTop) || 0;
+      var gap = first.top - top - mt;
+      if (gap > 0.5) {
+        var spacer = document.createElement("div");
+        spacer.style.height = gap + "px";
+        spacer.style.margin = "0";
+        c.appendChild(spacer);
+      }
+    }
+    for (var i = from; i <= to; i++) {
+      var k = kids[i].cloneNode(true);
+      if (k.id) k.removeAttribute("id");
+      c.appendChild(k);
+    }
+    return { el: c, base: base };
+  }
+
+  var cloneBase = 0;
   function invalidateClones() {
     if (cloneLeft) cloneLeft.remove();
     if (cloneFlap) cloneFlap.remove();
     cloneLeft = cloneFlap = null;
   }
 
-  function ensureClones() {
+  // めくるたびに、めくる2ページ分の複製を作り直す
+  function prepareClones(low, high) {
     buildTurnLayers();
-    if (cloneLeft) return;
-    cloneLeft = cloneContent();
+    invalidateClones();
+    var pc = partialClone(low, high);
+    cloneBase = pc.base;
+    cloneLeft = pc.el;
     left.page.appendChild(cloneLeft);
-    cloneFlap = cloneContent();
+    cloneFlap = pc.el.cloneNode(true);
     flapClip.page.insertBefore(cloneFlap, flapClip.page.firstChild);
   }
 
@@ -541,11 +621,11 @@
   // めくり用の層を準備する（番号の小さいページを上、大きいページを下に敷く）
   function beginTurn(low, high) {
     endTurn();
-    ensureClones();
+    prepareClones(low, high);
     sizeTurnLayers();
     showPage(content, high);      // 下に敷くページ（始まりの時点では left に隠れて見えない）
-    showPage(cloneLeft, low);
-    showPage(cloneFlap, low);
+    showPage(cloneLeft, low - cloneBase);
+    showPage(cloneFlap, low - cloneBase);
   }
 
   function foldTurn(from, to) {
@@ -735,16 +815,25 @@
   var PULL_TRIGGER = 110;                 // これ以上引っ張って離すと切り替える（px）
   var ARM_MS = 2500;                      // タップ操作で「もう一度」を受け付ける時間
   var edgeLabels = { prev: null, next: null }; // 前後の話のタイトル。null = その方向に話がない
+  // 話がない方向（最初の話の前・最終話の次）でしたいこと。null = 何もしない
+  // { glyph: "⟳", text: "更新を確認" } のように、矢印の代わりの印と案内の言葉を持つ
+  var edgeAction = null;
   var ind = null, indArrow = null, indTitle = null;
   var armed = null, armTimer = 0;
   var scrollPull = null;                  // スクロールモードの引っ張り
 
-  function setEdgeLabels(prev, next) {
+  function setEdgeLabels(prev, next, action) {
     edgeLabels.prev = prev == null ? null : String(prev);
     edgeLabels.next = next == null ? null : String(next);
+    if (action !== undefined) {
+      if (typeof action === "string") action = JSON.parse(action);
+      edgeAction = action && action.text ? { glyph: String(action.glyph || ""), text: String(action.text) } : null;
+    }
   }
 
   function edgeTitle(direction) { return direction === "end" ? edgeLabels.next : edgeLabels.prev; }
+  // その方向に進めるか（次の話があるか、話がなくても決めた動作があるか）
+  function edgeUsable(direction) { return edgeTitle(direction) != null || edgeAction != null; }
 
   function buildIndicator() {
     if (ind) return;
@@ -770,6 +859,7 @@
     var W = pageWidth(), H = pageHeight();
     var scroll = state.mode === "scroll";
     var title = edgeTitle(direction);
+    var action = title == null ? edgeAction : null;
     var dur = animate ? "transform 220ms ease-out, opacity 220ms" : "none";
     content.style.transition = dur;
     ind.style.transition = dur;
@@ -783,9 +873,14 @@
     }
 
     // 案内：矢印 ＋ 移る先の話のタイトル（話がなければタイトルだけ薄く）
-    indArrow.textContent = scroll ? (direction === "end" ? "↓" : "↑") : (direction === "end" ? "→" : "←");
-    indTitle.textContent = title == null ? (direction === "end" ? "最終話" : "最初の話") : title;
-    ind.className = (scroll ? "vertical " : "horizontal ") + (title != null && ready ? "ready" : "");
+    // 話がなく動作が決めてあるとき：矢印の代わりに動作の印、タイトルの代わりに「最終話 ・ 更新を確認」など
+    indArrow.textContent = action ? action.glyph
+      : scroll ? (direction === "end" ? "↓" : "↑") : (direction === "end" ? "→" : "←");
+    var endName = direction === "end" ? "最終話" : "最初の話";
+    indTitle.textContent = title != null ? title : action ? endName + (scroll ? "　·　" : "\n") + action.text : endName;
+    if (noticeText != null) indTitle.textContent = noticeText;
+    ind.className = (scroll ? "vertical " : "horizontal ") + (action ? "action " : "") +
+      ((title != null || action) && ready ? "ready" : "") + (noticeText != null ? " notice" : "");
     if (scroll) {
       ind.style.width = W + "px";
       ind.style.transform = direction === "end"
@@ -807,7 +902,7 @@
     if (!ind) return;
     placeEdge(direction, 0, false, true);
     setTimeout(function () {
-      if (!scrollPull && !armed && !(drag && drag.edge)) {
+      if (!scrollPull && !armed && !(drag && drag.edge) && noticeText == null) {
         content.style.transition = "";
         if (state.mode === "scroll") content.style.transform = "";
       }
@@ -816,7 +911,12 @@
 
   function goEdge(direction) {
     disarm();
-    if (edgeTitle(direction) == null) { releaseEdge(direction); return false; }
+    if (!edgeUsable(direction)) { releaseEdge(direction); return false; }
+    if (edgeTitle(direction) == null) {
+      // 動作のとき：本文はずらしたまま待つ（結果は showNotice で出る）
+      noticeDir = direction;
+      placeEdge(direction, edgeHoldShift(), true, true);
+    }
     bridge.onEdge(direction);
     return true;
   }
@@ -828,13 +928,28 @@
 
   // タップ操作で話の端に達したとき。1回目は本文を少しずらして案内を見せ、2回目で移る
   function tapAtEdge(direction) {
-    if (armed === direction && edgeTitle(direction) != null) { goEdge(direction); return; }
+    if (armed === direction && edgeUsable(direction)) { goEdge(direction); return; }
     armed = direction;
-    var shift = state.mode === "scroll" ? 72 : Math.min(150, pageWidth() * 0.38);
-    placeEdge(direction, shift, true, true);
+    placeEdge(direction, edgeHoldShift(), true, true);
     clearTimeout(armTimer);
     armTimer = setTimeout(function () { armed = null; releaseEdge(direction); }, ARM_MS);
   }
+
+  // 動作（更新を確認など）の途中経過・結果を、案内と同じ場所に出す。
+  // 本文をずらしたまま矢印の位置に印、タイトルの位置に知らせを書き、ms 経ったら元に戻す（0 = 出したまま）。
+  // text が空なら、すぐ元に戻す
+  var noticeText = null, noticeDir = "end", noticeTimer = 0;
+  function showNotice(text, ms, direction) {
+    clearTimeout(noticeTimer);
+    disarm();
+    if (direction) noticeDir = direction;
+    if (!text) { noticeText = null; releaseEdge(noticeDir); return; }
+    noticeText = String(text);
+    placeEdge(noticeDir, edgeHoldShift(), true, true);
+    // 知らせが来ないまま止まらないよう、出したままでも 10 秒で戻す
+    noticeTimer = setTimeout(function () { noticeText = null; releaseEdge(noticeDir); }, ms > 0 ? ms : 10000);
+  }
+  function edgeHoldShift() { return state.mode === "scroll" ? 72 : Math.min(150, pageWidth() * 0.38); }
 
   // スクロールモード：底・天井でさらに引っ張る
   function atScrollBottom() { return viewport.scrollTop + pageHeight() >= viewport.scrollHeight - 1; }
@@ -927,6 +1042,7 @@
   function relayout() {
     if (!hasSize()) return; // 画面サイズが決まったら resize イベントでもう一度呼ばれる
     endTurn();
+    clearHighlight();
     applyViewportSize();
     var pos = state.pos;
     state.textCache = [];
@@ -972,7 +1088,11 @@
   var switchTimer = 0;
   function switchChapter(doc, position, direction) {
     endTurn();
+    stopAuto(false);
+    hits = [];
     disarm();
+    noticeText = null;
+    clearTimeout(noticeTimer);
     if (ind) ind.style.opacity = "0";
     var d = direction > 0 ? 1 : direction < 0 ? -1 : 0;
     var dx = 28 * d;
@@ -984,6 +1104,7 @@
       state.doc = typeof doc === "string" ? JSON.parse(doc) : doc;
       state.pos = position || { block: 0, offset: 0 };
       content.style.transition = "";
+      if (state.mode === "scroll") content.style.transform = "";
       render(state.doc);
       whenFontsReady(function () {
         waitForSize(function () {
@@ -1001,8 +1122,11 @@
   }
 
   function applySettings(settings) {
+    var before = state.settings.showImages;
     state.settings = Object.assign({}, state.settings, settings);
     applyCssVariables();
+    // 挿絵の表示・非表示が変わったら、本文を描き直す（読書位置は state.pos で保たれる）
+    if (state.doc && before !== state.settings.showImages) render(state.doc);
     whenFontsReady(relayout);
   }
 
@@ -1010,6 +1134,7 @@
     if (mode !== "paged" && mode !== "scroll") return;
     state.mode = mode;
     endTurn();
+    stopAuto(true); // 操作を変えたら自動送りは止める（ボタンの表示も戻してもらう）
     invalidateClones(); // スクロールモードでは複製を使わないので捨てる
     applyCssVariables();
     whenFontsReady(relayout);
@@ -1033,9 +1158,140 @@
     }));
   }
 
+  // ---------------------------------------------------------------- 本文内検索（READ-15）
+  //
+  // 今の話の中を探す。ルビの読みは探さず、親文字だけを探す（読書位置の数え方と同じ）。
+  // 英字は大文字・小文字を区別しない。見つけた所は、本文の上に薄い色の帯を重ねて示す
+
+  var hits = [], hitLength = 0;
+
+  function blockText(i) {
+    var t = textNodesOf(i);
+    var s = "";
+    for (var k = 0; k < t.nodes.length; k++) s += t.nodes[k].node.data;
+    return s;
+  }
+
+  function search(q) {
+    clearHighlight();
+    hits = [];
+    hitLength = q ? String(q).length : 0;
+    if (!q) return "[]";
+    var needle = String(q).toLowerCase();
+    for (var i = 0; i < state.blocks.length && hits.length < 1000; i++) {
+      var text = blockText(i).toLowerCase();
+      var from = 0, at;
+      while ((at = text.indexOf(needle, from)) >= 0 && hits.length < 1000) {
+        hits.push({ block: i, offset: at });
+        from = at + Math.max(1, needle.length);
+      }
+    }
+    return JSON.stringify(hits);
+  }
+
+  function clearHighlight() {
+    var old = content.querySelectorAll(".search-hit");
+    for (var i = 0; i < old.length; i++) old[i].remove();
+  }
+
+  // k 番目に見つけた所へ移って、帯を重ねる
+  function showHit(k) {
+    var h = hits[k];
+    if (!h) return;
+    stopAuto();
+    goToPosition(h.block, h.offset, false);
+    clearHighlight();
+    var cr = content.getBoundingClientRect();
+    var box = null;
+    var flush = function () {
+      if (!box) return;
+      var d = document.createElement("div");
+      d.className = "search-hit";
+      d.style.left = box.left + "px";
+      d.style.top = box.top + "px";
+      d.style.width = box.width + "px";
+      d.style.height = box.height + "px";
+      content.appendChild(d);
+      box = null;
+    };
+    for (var off = h.offset; off < h.offset + hitLength; off++) {
+      var r = charRect(h.block, off);
+      var x = r.left - cr.left, y = r.top - cr.top;
+      // 同じ行で続いている文字は1本の帯にまとめる
+      if (box && Math.abs(box.top - y) < 2 && Math.abs(box.left + box.width - x) < 3) {
+        box.width = x + r.width - box.left;
+      } else {
+        flush();
+        box = { left: x, top: y, width: r.width, height: r.height };
+      }
+    }
+    flush();
+  }
+
+  // ---------------------------------------------------------------- 自動スクロール（READ-12）
+  //
+  // 一定の速さで上へ流す。指で触れている間は止まり、離して少ししたら再開する。
+  // ページ送りの設定のときは、Kotlin 側が動いている間だけスクロール操作に切り替えてから呼ぶ
+  // （ページ送りのまま呼ばれたときは、一定の間隔で次のページへめくる）。
+  // 話の終わりに着いたら止めて、Kotlin に知らせる（onAutoStop）。speed は 1（遅い）〜10（速い）
+
+  var auto = null;
+
+  function startAuto(speed) {
+    stopAuto();
+    speed = Math.max(1, Math.min(10, speed | 0 || 5));
+    disarm();
+    if (state.mode === "scroll") {
+      // 1 で毎秒 約0.15行、10 で 約4.2行（段ごとに約1.45倍）
+      auto = { kind: "scroll", pxPerSec: lineStep() * 0.15 * Math.pow(1.45, speed - 1), last: null, carry: 0, pausedUntil: 0, raf: 0 };
+      var step = function (now) {
+        if (!auto || auto.kind !== "scroll") return;
+        if (auto.last !== null && now >= auto.pausedUntil) {
+          auto.carry += auto.pxPerSec * Math.min(0.1, (now - auto.last) / 1000);
+          var px = Math.floor(auto.carry);
+          if (px >= 1) { viewport.scrollTop += px; auto.carry -= px; }
+          if (atScrollBottom()) { stopAuto(true); return; }
+        }
+        auto.last = now;
+        auto.raf = requestAnimationFrame(step);
+      };
+      auto.raf = requestAnimationFrame(step);
+    } else {
+      auto = { kind: "paged", timer: 0 };
+      var turn = function () {
+        if (!auto || auto.kind !== "paged") return;
+        if (state.page >= state.totalPages - 1) { stopAuto(true); return; }
+        goToPage(state.page + 1, true);
+        auto.timer = setTimeout(turn, (30 - 2.5 * speed) * 1000);
+      };
+      auto.timer = setTimeout(turn, (30 - 2.5 * speed) * 1000);
+    }
+  }
+
+  // reachedEnd = true なら、話の終わりで止まったことを Kotlin に知らせる
+  function stopAuto(reachedEnd) {
+    if (!auto) return;
+    if (auto.raf) cancelAnimationFrame(auto.raf);
+    if (auto.timer) clearTimeout(auto.timer);
+    auto = null;
+    if (reachedEnd && bridge.onAutoStop) bridge.onAutoStop();
+  }
+
+  // スクロールの自動送り中に指で触れたら一時停止
+  viewport.addEventListener("touchstart", function () { if (auto && auto.kind === "scroll") auto.pausedUntil = Infinity; }, { passive: true });
+  var resumeAuto = function () { if (auto && auto.kind === "scroll") auto.pausedUntil = performance.now() + 1500; };
+  viewport.addEventListener("touchend", resumeAuto, { passive: true });
+  viewport.addEventListener("touchcancel", resumeAuto, { passive: true });
+
   window.Reader = {
+    search: search,
+    showHit: showHit,
+    clearSearch: function () { hits = []; clearHighlight(); },
+    startAuto: startAuto,
+    stopAuto: function () { stopAuto(false); },
     switchChapter: switchChapter,
     setEdgeLabels: setEdgeLabels,
+    showNotice: showNotice,
     pagesOf: pagesOf,
     setSwipeEnabled: setSwipeEnabled,
     load: load,

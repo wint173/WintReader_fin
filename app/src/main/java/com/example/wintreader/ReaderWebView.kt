@@ -43,6 +43,10 @@ data class ReaderSettings(
     val fontFamily: String = "sans-serif",
     /** ページめくりのアニメーション（READ-13）："fold"（折り返し）| "slide" | "none" */
     val animation: String = "fold",
+    /** 挿絵を表示するか（表示しないときは「［挿絵］」の印だけ出す） */
+    val showImages: Boolean = true,
+    /** 自動スクロールの速さ（READ-12）。1（遅い）〜10（速い） */
+    val autoSpeed: Int = 5,
 )
 
 /** 背景色プリセット（UI-03：6種類） */
@@ -54,6 +58,9 @@ val ColorPresets: List<Pair<String, String>> = listOf(
     "#d7dbe0" to "#1c1f24", // 青灰
     "#121212" to "#c8c8c8", // 黒
 )
+
+/** 月のアイコンで切り替える夜の配色（黒の配色と同じ） */
+val NightColors: Pair<String, String> = "#121212" to "#c8c8c8"
 
 val ReaderJson = Json { encodeDefaults = true }
 
@@ -87,9 +94,19 @@ class ReaderController {
     }
 
     /** 話の端で「次の話へ：○○」と案内するためのタイトル（null = その方向に話がない） */
-    fun setEdgeLabels(prev: String?, next: String?) {
+    /** 前後の話のタイトルと、話がない方向でする動作（印と名前）を伝える */
+    fun setEdgeLabels(prev: String?, next: String?, action: EdgeAction?) {
         val ser = String.serializer().nullable
-        exec("window.Reader && Reader.setEdgeLabels(${ReaderJson.encodeToString(ser, prev)}, ${ReaderJson.encodeToString(ser, next)})")
+        val actionJson = action?.let {
+            "{\"glyph\":${ReaderJson.encodeToString(String.serializer(), it.glyph)},\"text\":${ReaderJson.encodeToString(String.serializer(), it.label)}}"
+        } ?: "null"
+        exec("window.Reader && Reader.setEdgeLabels(${ReaderJson.encodeToString(ser, prev)}, ${ReaderJson.encodeToString(ser, next)}, $actionJson)")
+    }
+
+    /** 話の端の案内の場所に知らせを出す。ms = 0 なら出したまま、text = null なら消す */
+    fun showNotice(text: String?, ms: Int, direction: String) {
+        val ser = String.serializer().nullable
+        exec("window.Reader && Reader.showNotice(${ReaderJson.encodeToString(ser, text)}, $ms, '$direction')")
     }
 
     fun setMode(mode: ReadingMode) {
@@ -115,6 +132,30 @@ class ReaderController {
             if (pages != null && pages.size == positions.size) onResult(pages)
         }
     }
+
+    // ------------------------------------------------ 本文内検索（READ-15）
+
+    /** 今の話の中を探す。見つかった位置の一覧を返す */
+    fun search(query: String, onResult: (List<ReadingPosition>) -> Unit) {
+        val view = webView ?: return
+        val arg = ReaderJson.encodeToString(String.serializer(), query)
+        view.evaluateJavascript("(window.Reader && Reader.search($arg)) || \"[]\"") { raw ->
+            val hits = runCatching {
+                val inner = ReaderJson.decodeFromString(String.serializer(), raw)
+                ReaderJson.decodeFromString(ListSerializer(ReadingPosition.serializer()), inner)
+            }.getOrDefault(emptyList())
+            onResult(hits)
+        }
+    }
+
+    /** index 番目に見つかった所へ移って、印を付ける */
+    fun showHit(index: Int) = exec("window.Reader && Reader.showHit($index)")
+    fun clearSearch() = exec("window.Reader && Reader.clearSearch()")
+
+    // ------------------------------------------------ 自動スクロール（READ-12）
+
+    fun startAuto(speed: Int) = exec("window.Reader && Reader.startAuto($speed)")
+    fun stopAuto() = exec("window.Reader && Reader.stopAuto()")
 }
 
 /** reader.js からの通知を受け取る。JavaScript のスレッドから呼ばれるのでメインスレッドへ渡す */
@@ -122,6 +163,8 @@ class ReaderBridge(
     private val onReadyCallback: (totalPages: Int) -> Unit,
     private val onPageChangedCallback: (page: Int, totalPages: Int, position: ReadingPosition) -> Unit,
     private val onEdgeCallback: (direction: String) -> Unit,
+    /** 自動スクロールが話の終わりで止まったとき */
+    private val onAutoStopCallback: () -> Unit = {},
 ) {
     private val main = Handler(Looper.getMainLooper())
 
@@ -138,6 +181,11 @@ class ReaderBridge(
     @JavascriptInterface
     fun onEdge(direction: String) {
         main.post { onEdgeCallback(direction) }
+    }
+
+    @JavascriptInterface
+    fun onAutoStop() {
+        main.post { onAutoStopCallback() }
     }
 }
 
