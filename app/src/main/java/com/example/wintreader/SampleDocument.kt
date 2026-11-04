@@ -1,10 +1,30 @@
 package com.example.wintreader
 
 /**
- * M1 の動作確認用サンプル本文（自作）。
- * ルビ・傍点・空行・区切り線・長い段落を含み、数十ページになる長さにしている。
+ * 動作確認用のサンプル作品（自作の文章）。
+ * サイトからの取得（M3）ができるまで、本棚・目次・栞の確認に使う。
  */
 object SampleDocument {
+
+    data class SampleWork(
+        val workId: String,
+        val title: String,
+        val author: String,
+        val chapterCount: Int,
+    )
+
+    val works = listOf(
+        SampleWork("w1", "始まりの夜の物語", "サンプル作者A", 6),
+        SampleWork("w2", "窓辺の地図", "サンプル作者B", 4),
+        SampleWork("w3", "鐘が三度鳴るとき", "サンプル作者C", 3),
+    )
+
+    private val chapterTitles = listOf(
+        "始まりの夜", "古い地図", "見知らぬ文字", "鐘の音", "旅立ち", "新しい街", "約束", "帰り道",
+    )
+
+    fun chapterTitle(index: Int): String =
+        "第${index + 1}話　${chapterTitles[index % chapterTitles.size]}"
 
     private val sentences = listOf(
         "春の夜、静かな風が窓を揺らしていた。",
@@ -17,18 +37,21 @@ object SampleDocument {
         "窓の外で、鐘の音が三度鳴った。",
     )
 
-    fun create(): NovelDocument {
+    /** 作品 work の第 (index + 1) 話の本文。話ごとに文章の並びを少し変える */
+    fun create(work: SampleWork, index: Int): NovelDocument {
         val blocks = mutableListOf<ContentBlock>()
         var n = 0
-        for (i in 0 until 300) {
+        val shift = index * 3 + work.workId.hashCode().mod(5)
+        val length = 120 + (index % 3) * 60
+        for (i in 0 until length) {
             when {
                 i % 7 == 6 -> blocks += ContentBlock.BlankLine
-                i == 60 -> blocks += ContentBlock.Divider()
+                i == 40 -> blocks += ContentBlock.Divider()
                 else -> {
                     n++
                     val spans = mutableListOf<TextSpan>()
                     spans += TextSpan.Plain("【$n】")
-                    spans += TextSpan.Plain(sentences[i % sentences.size])
+                    spans += TextSpan.Plain(sentences[(i + shift) % sentences.size])
                     if (i % 3 == 0) {
                         spans += TextSpan.Ruby("魔導書", "グリモワール")
                         spans += TextSpan.Plain("を開くと、")
@@ -36,16 +59,16 @@ object SampleDocument {
                         spans += TextSpan.Plain("が目を覚ました。")
                     }
                     if (i % 4 == 0) {
-                        spans += TextSpan.Plain(sentences[(i + 3) % sentences.size].repeat(3))
+                        spans += TextSpan.Plain(sentences[(i + shift + 3) % sentences.size].repeat(2))
                     }
                     blocks += ContentBlock.Paragraph(spans)
                 }
             }
         }
         return NovelDocument(
-            workId = "sample",
-            chapterId = "1",
-            title = "第1話　始まりの夜",
+            workId = work.workId,
+            chapterId = "${index + 1}",
+            title = chapterTitle(index),
             blocks = blocks,
         )
     }

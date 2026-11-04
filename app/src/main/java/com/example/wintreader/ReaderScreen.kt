@@ -1,6 +1,5 @@
 package com.example.wintreader
 
-import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -41,7 +40,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -51,39 +49,32 @@ import java.time.format.DateTimeFormatter
 
 private fun parseColor(hex: String): Color = Color(android.graphics.Color.parseColor(hex))
 
-/** 読書位置の簡易保存（M2 で Room に置き換える） */
-private class PositionStore(context: Context) {
-    private val prefs = context.getSharedPreferences("reader_position", Context.MODE_PRIVATE)
-
-    fun load(chapterKey: String): ReadingPosition? {
-        if (!prefs.contains("$chapterKey.block")) return null
-        return ReadingPosition(prefs.getInt("$chapterKey.block", 0), prefs.getInt("$chapterKey.offset", 0))
-    }
-
-    fun save(chapterKey: String, pos: ReadingPosition) {
-        prefs.edit()
-            .putInt("$chapterKey.block", pos.block)
-            .putInt("$chapterKey.offset", pos.offset)
-            .apply()
-    }
-}
-
+/**
+ * 1話分の本文を表示する画面。
+ * 表示設定は prefs から受け取り、変えたら onPrefsChange で保存してもらう。
+ * 読書位置は initialPosition から始め、ページが変わるたびに onPositionChanged で知らせる。
+ */
 @Composable
-fun ReaderScreen(document: NovelDocument) {
-    val context = LocalContext.current
-    val store = remember { PositionStore(context) }
-    val chapterKey = "${document.workId}/${document.chapterId}"
-
-    var settings by remember { mutableStateOf(ReaderSettings()) }
-    var mode by remember { mutableStateOf(ReadingMode.TAP) }
+fun ReaderScreen(
+    document: NovelDocument,
+    initialPosition: ReadingPosition?,
+    prefs: ReaderPrefs,
+    onPrefsChange: (ReaderPrefs) -> Unit,
+    onPositionChanged: (ReadingPosition) -> Unit,
+) {
+    var settings by remember { mutableStateOf(prefs.settings) }
+    var mode by remember { mutableStateOf(prefs.mode) }
     var page by remember { mutableIntStateOf(1) }
     var totalPages by remember { mutableIntStateOf(1) }
     var menuVisible by remember { mutableStateOf(false) }
     // ページ送りの方向：true = 左タップで次ページ（初期値）、false = 右タップで次ページ
-    var leftTapNext by remember { mutableStateOf(true) }
+    var leftTapNext by remember { mutableStateOf(prefs.leftTapNext) }
 
     val controller = remember { ReaderController() }
     val currentMode by rememberUpdatedState(mode)
+    val positionCallback by rememberUpdatedState(onPositionChanged)
+
+    fun persist() = onPrefsChange(ReaderPrefs(settings, mode, leftTapNext))
 
     val bridge = remember {
         ReaderBridge(
@@ -91,9 +82,9 @@ fun ReaderScreen(document: NovelDocument) {
             onPageChangedCallback = { p, total, pos ->
                 page = p
                 totalPages = total
-                store.save(chapterKey, pos)
+                positionCallback(pos)
             },
-            onEdgeCallback = { /* 前後の話への移動は M2 で実装 */ },
+            onEdgeCallback = { /* 前後の話への移動は M2 の後半で実装 */ },
         )
     }
 
@@ -129,7 +120,8 @@ fun ReaderScreen(document: NovelDocument) {
                         }
                     },
                     onPageLoaded = {
-                        controller.load(document, settings, store.load(chapterKey))
+                        controller.load(document, settings, initialPosition)
+                        if (mode != ReadingMode.TAP) controller.setMode(mode)
                     },
                 ).also { controller.webView = it }
             },
@@ -158,14 +150,19 @@ fun ReaderScreen(document: NovelDocument) {
                 page = page,
                 totalPages = totalPages,
                 leftTapNext = leftTapNext,
-                onTapDirectionChange = { leftTapNext = it },
+                onTapDirectionChange = {
+                    leftTapNext = it
+                    persist()
+                },
                 onSettingsChange = {
                     settings = it
                     controller.applySettings(it)
+                    persist()
                 },
                 onModeChange = {
                     mode = it
                     controller.setMode(it)
+                    persist()
                 },
                 onPageSelected = { controller.goToPage(it - 1) },
             )
