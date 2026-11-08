@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 端末がダークのときは、起動直後（アプリの画面が出る前）の下地も暗くする -->
+    <style name="Theme.WintReader" parent="android:Theme.Material.NoActionBar" />
+</resources>
