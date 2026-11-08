@@ -56,6 +56,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -200,12 +204,23 @@ fun BrowserScreen(
     val novelsFlow = remember { repo.observeNovels() }
     val novels by novelsFlow.collectAsState(initial = emptyList())
 
+    // 読み込み中に WebView の白が一瞬出ないよう、アプリの面の色を下に敷き、ページが描けてから表に出す
+    val surfaceArgb = MaterialTheme.colorScheme.surface.toArgb()
+    var pageVisible by remember { mutableStateOf(false) }
+    val pageAlpha by animateFloatAsState(if (pageVisible) 1f else 0f, tween(220), label = "pageAlpha")
+
     val webView = remember {
+        // デバッグ版では PC の Chrome（chrome://inspect）から中を調べられるようにする
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         WebView(context).apply {
+            setBackgroundColor(surfaceArgb)
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            // Chrome と同じように、ページの viewport の指定どおりに組む（なろうのランキングの横から出るメニューなど）
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
             webViewClient = object : WebViewClient() {
                 // 暗号化なし（http://）のページは Android が読み込ませないので、https:// に直して開く
                 // （ハーメルンの挿絵のリンクなどが http:// で書かれている）
@@ -228,7 +243,12 @@ fun BrowserScreen(
                     canGoBack = view.canGoBack()
                 }
 
+                override fun onPageCommitVisible(view: WebView, url: String) {
+                    pageVisible = true
+                }
+
                 override fun onPageFinished(view: WebView, url: String) {
+                    pageVisible = true
                     currentUrl = url
                     canGoBack = view.canGoBack()
                     CookieManager.getInstance().flush()
@@ -282,7 +302,7 @@ fun BrowserScreen(
                 LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
             }
 
-            AndroidView(factory = { webView }, modifier = Modifier.weight(1f).fillMaxWidth())
+            AndroidView(factory = { webView }, modifier = Modifier.weight(1f).fillMaxWidth().alpha(pageAlpha))
 
             // 作品のページを開いているときだけ出る操作（WEB-05）
             if (ref != null) {

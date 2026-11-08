@@ -40,7 +40,8 @@
     fg: "#222222",
     fontFamily: "sans-serif",
     animation: "slide",  // "slide" | "fold" | "none"
-    showImages: true     // 挿絵を表示するか
+    showImages: true,    // 挿絵を表示するか
+    showTitle: true      // 話の頭にタイトルを出すか
   };
 
   var ANIMATION_MS = 220;
@@ -74,7 +75,8 @@
     content.classList.toggle("latin", latin);
     content.setAttribute("lang", latin ? (doc.lang && !/^ja/i.test(doc.lang) ? doc.lang : "en") : "ja");
 
-    if (doc.title) {
+    // 話のタイトル（表示設定で隠せる。読書位置の番号には入らない）
+    if (doc.title && state.settings.showTitle !== false) {
       var h = document.createElement("div");
       h.className = "title";
       h.textContent = doc.title;
@@ -316,7 +318,16 @@
     if (state.blocks.length === 0) return;
     block = Math.max(0, Math.min(block | 0, state.blocks.length - 1));
     offset = Math.max(0, offset | 0);
-    if (state.mode === "scroll") {
+    if (block === 0 && offset === 0) {
+      // 話の先頭：タイトルも見えるよう、いちばん上（最初のページ）を出す
+      if (state.mode === "scroll") {
+        viewport.scrollTop = 0;
+        state.page = 0;
+      } else {
+        state.page = 0;
+        setTransform();
+      }
+    } else if (state.mode === "scroll") {
       var r = charRect(block, offset);
       viewport.scrollTop += r.top - state.settings.padTop;
       state.page = Math.floor(viewport.scrollTop / pageHeight());
@@ -1096,9 +1107,13 @@
     if (ind) ind.style.opacity = "0";
     var d = direction > 0 ? 1 : direction < 0 ? -1 : 0;
     var dx = 28 * d;
+    // スクロール操作では縦に流す（次の話は下から上へ）。ページ送りでは横に流す
+    var vertical = state.mode === "scroll";
+    var shiftBy = function (px) { return vertical ? "translate3d(0," + px + "px,0)" : "translate3d(" + px + "px,0,0)"; };
+    if (vertical) dx = 40 * d;
     viewport.style.transition = "opacity " + SWITCH_OUT_MS + "ms ease-in, transform " + SWITCH_OUT_MS + "ms ease-in";
     viewport.style.opacity = "0";
-    viewport.style.transform = "translate3d(" + (-dx) + "px,0,0)";
+    viewport.style.transform = shiftBy(-dx);
     clearTimeout(switchTimer);
     switchTimer = setTimeout(function () {
       state.doc = typeof doc === "string" ? JSON.parse(doc) : doc;
@@ -1111,7 +1126,7 @@
           relayout();
           bridge.onReady(state.totalPages);
           viewport.style.transition = "none";
-          viewport.style.transform = "translate3d(" + dx + "px,0,0)";
+          viewport.style.transform = shiftBy(dx);
           void viewport.offsetWidth; // 位置を確定させてからアニメーションを始める
           viewport.style.transition = "opacity " + SWITCH_IN_MS + "ms ease-out, transform " + SWITCH_IN_MS + "ms ease-out";
           viewport.style.opacity = "1";
@@ -1122,11 +1137,11 @@
   }
 
   function applySettings(settings) {
-    var before = state.settings.showImages;
+    var before = state.settings.showImages, beforeTitle = state.settings.showTitle;
     state.settings = Object.assign({}, state.settings, settings);
     applyCssVariables();
-    // 挿絵の表示・非表示が変わったら、本文を描き直す（読書位置は state.pos で保たれる）
-    if (state.doc && before !== state.settings.showImages) render(state.doc);
+    // 挿絵・タイトルの表示・非表示が変わったら、本文を描き直す（読書位置は state.pos で保たれる）
+    if (state.doc && (before !== state.settings.showImages || beforeTitle !== state.settings.showTitle)) render(state.doc);
     whenFontsReady(relayout);
   }
 

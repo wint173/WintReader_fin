@@ -251,6 +251,15 @@ object WIcons {
     val ChevronDown = icon("chevron_down") { line { moveTo(6f, 9f); lineTo(12f, 15f); lineTo(18f, 9f) } }
 
     /** 閉じる（×） */
+    /** 鉛筆（カスタムの色を作る） */
+    val Pencil = icon("pencil") {
+        line { moveTo(4f, 20f); lineTo(5f, 15.5f); lineTo(16f, 4.5f); lineTo(19.5f, 8f); lineTo(8.5f, 19f); close() }
+        line { moveTo(13.5f, 7f); lineTo(17f, 10.5f) }
+    }
+
+    /** チェック */
+    val Check = icon("check") { line(2.6f) { moveTo(5f, 12.5f); lineTo(10f, 17.5f); lineTo(19f, 7f) } }
+
     val Close = icon("close") { line { moveTo(6f, 6f); lineTo(18f, 18f); moveTo(18f, 6f); lineTo(6f, 18f) } }
 
     /** その他の操作（縦の三点） */
@@ -265,5 +274,15 @@ object WIcons {
     }
     val TitleWrap = icon("title_wrap") {
         line { moveTo(3f, 6f); lineTo(21f, 6f); moveTo(3f, 12f); lineTo(21f, 12f); moveTo(3f, 18f); lineTo(14f, 18f) }
+    }
+
+    /** 話のタイトルを出す（太い見出しの帯と本文の線）・出さない（本文の線だけ、見出しの所は点線） */
+    val TitleShow = icon("title_show") {
+        solid { moveTo(4f, 4f); lineTo(16f, 4f); lineTo(16f, 8f); lineTo(4f, 8f); close() }
+        line { moveTo(4f, 13f); lineTo(20f, 13f); moveTo(4f, 18f); lineTo(20f, 18f) }
+    }
+    val TitleHide = icon("title_hide") {
+        line(1.6f) { moveTo(4f, 6f); lineTo(6f, 6f); moveTo(9f, 6f); lineTo(11f, 6f); moveTo(14f, 6f); lineTo(16f, 6f) }
+        line { moveTo(4f, 13f); lineTo(20f, 13f); moveTo(4f, 18f); lineTo(20f, 18f) }
     }
 }

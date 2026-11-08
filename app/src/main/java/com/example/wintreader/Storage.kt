@@ -81,6 +81,12 @@ data class AppPrefs(
     val afterAdd: AfterAddAction = AfterAddAction.STAY_ON_SITE,
     /** 読んでいる話の次を何話先に取っておくか（CACHE-02） */
     val prefetchCount: Int = 2,
+    /** テーマの色（AppTheme.kt の AccentPreset） */
+    val accent: AccentPreset = AccentPreset.DYNAMIC,
+    /** カスタムの色（ARGB） */
+    val customColor: Int = 0xFF5C6BC0.toInt(),
+    /** ダークのとき背景を真っ黒にする */
+    val amoled: Boolean = false,
 )
 
 /** 文庫タブのサイトの並び順と、表示しないサイト */
@@ -130,6 +136,9 @@ class SettingsStore(private val context: Context) {
     private val keyTheme = stringPreferencesKey("theme")
     private val keyAfterAdd = stringPreferencesKey("after_add")
     private val keyPrefetch = intPreferencesKey("prefetch_count")
+    private val keyAccent = stringPreferencesKey("theme_accent")
+    private val keyCustomColor = intPreferencesKey("theme_custom_color")
+    private val keyAmoled = booleanPreferencesKey("theme_amoled")
     private val keyReadingMillis = longPreferencesKey("reading_millis")
     private val keyUsedDays = intPreferencesKey("used_days")
     private val keyLastUsedDay = stringPreferencesKey("last_used_day")
@@ -178,6 +187,9 @@ class SettingsStore(private val context: Context) {
             theme = p[keyTheme]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.SYSTEM,
             afterAdd = p[keyAfterAdd]?.let { runCatching { AfterAddAction.valueOf(it) }.getOrNull() } ?: AfterAddAction.STAY_ON_SITE,
             prefetchCount = p[keyPrefetch] ?: 2,
+            accent = p[keyAccent]?.let { runCatching { AccentPreset.valueOf(it) }.getOrNull() } ?: AccentPreset.DYNAMIC,
+            customColor = p[keyCustomColor] ?: AppPrefs().customColor,
+            amoled = p[keyAmoled] ?: false,
         )
     }
 
@@ -186,6 +198,9 @@ class SettingsStore(private val context: Context) {
             p[keyTheme] = prefs.theme.name
             p[keyAfterAdd] = prefs.afterAdd.name
             p[keyPrefetch] = prefs.prefetchCount
+            p[keyAccent] = prefs.accent.name
+            p[keyCustomColor] = prefs.customColor
+            p[keyAmoled] = prefs.amoled
         }
     }
 

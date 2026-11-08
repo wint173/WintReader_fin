@@ -123,7 +123,8 @@ fun ReaderScreen(
     // ページ送りの方向：true = 左タップで次ページ（初期値）、false = 右タップで次ページ
     var leftTapNext by remember { mutableStateOf(prefs.leftTapNext) }
     // 最初の話の前・最終話の次へ進もうとしたときの動作
-    var edgeAction by remember { mutableStateOf(prefs.edgeAction) }
+    // 最初の話の前・最終話の次では、いつも更新を確かめる（設定の選択肢はなくした）
+    val edgeAction = EdgeAction.UPDATE
     // 夜の配色（UI-11）・画面の向き（UI-06）・読書画面の明るさ（UI-04）
     var nightMode by remember { mutableStateOf(prefs.nightMode) }
     var orientation by remember { mutableStateOf(prefs.orientation) }
@@ -151,8 +152,9 @@ fun ReaderScreen(
     )
 
     // 実際に表示する設定。夜の配色のときは色だけ黒の配色にする（元の色は settings に残る）
+    // 話のタイトルはいつも出す（設定の選択肢はなくした。以前「出さない」にしていても出す）
     fun shown(s: ReaderSettings = settings) =
-        if (nightMode) s.copy(bg = NightColors.first, fg = NightColors.second) else s
+        (if (nightMode) s.copy(bg = NightColors.first, fg = NightColors.second) else s).copy(showTitle = true)
 
     // 画面の向き：読書画面にいる間だけ固定する
     val activity = LocalContext.current as? Activity
@@ -303,7 +305,8 @@ fun ReaderScreen(
                                 if (searchOpen) closeSearch()
                             }
                             zone == TapZone.CENTER -> menuVisible = true
-                            currentMode == ReadingMode.SCROLL -> Unit // スクロール時は中央タップのみ
+                            // スクロール操作では、ページ送りに使う左右がないので、どこをタップしてもメニューを出す
+                            currentMode == ReadingMode.SCROLL -> menuVisible = true
                             // 初期値は左タップで次ページ。設定パネルで逆にできる
                             (zone == TapZone.LEFT) == leftTapNext -> controller.next()
                             else -> controller.prev()
@@ -403,7 +406,6 @@ fun ReaderScreen(
                     settings = settings,
                     mode = mode,
                     leftTapNext = leftTapNext,
-                    edgeAction = edgeAction,
                     orientation = orientation,
                     onOrientationChange = {
                         orientation = it
@@ -415,10 +417,6 @@ fun ReaderScreen(
                         persist()
                     },
                     onBack = { settingsOpen = false },
-                    onEdgeActionChange = {
-                        edgeAction = it
-                        persist()
-                    },
                     onTapDirectionChange = {
                         leftTapNext = it
                         persist()
@@ -741,14 +739,12 @@ private fun SettingsPanel(
     settings: ReaderSettings,
     mode: ReadingMode,
     leftTapNext: Boolean,
-    edgeAction: EdgeAction,
     orientation: String,
     onOrientationChange: (String) -> Unit,
     brightness: Float,
     onBrightnessChange: (Float) -> Unit,
     onBack: () -> Unit,
     onTapDirectionChange: (Boolean) -> Unit,
-    onEdgeActionChange: (EdgeAction) -> Unit,
     onSettingsChange: (ReaderSettings) -> Unit,
     onModeChange: (ReadingMode) -> Unit,
 ) {
@@ -883,15 +879,6 @@ private fun SettingsPanel(
                 ),
                 selected = orientation,
                 onSelect = onOrientationChange,
-            )
-            IconChoiceRow(
-                label = "話の端",
-                options = listOf(
-                    Triple(EdgeAction.UPDATE, WIcons.Refresh, "最終話の次で更新を確認する"),
-                    Triple(EdgeAction.WORK_PAGE, WIcons.OpenPage, "最終話の次で作品のページを開く"),
-                ),
-                selected = edgeAction,
-                onSelect = onEdgeActionChange,
             )
 
             Spacer(Modifier.size(8.dp))

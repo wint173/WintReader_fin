@@ -15,7 +15,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             // アプリの見た目は設定（ライト・ダーク・端末に合わせる）に従う
             val prefs by settingsStore.appPrefs.collectAsState(initial = AppPrefs())
-            WintTheme(prefs.theme) {
+            WintTheme(prefs) {
                 AppRoot()
             }
         }

@@ -227,7 +227,8 @@ private fun ReaderRoute(novelId: String, onClose: () -> Unit, onOpenNovel: (Stri
 
     // 最初の話の前・最終話の次へ進もうとしたとき：設定した動作をする
     suspend fun edgeAction(direction: String) {
-        when (prefs?.edgeAction ?: EdgeAction.UPDATE) {
+        // 以前の版で「作品のページへ」を選んでいても、今は更新の確認に統一している
+        when (EdgeAction.UPDATE) {
             EdgeAction.WORK_PAGE -> {
                 notice = ReaderNotice(null, direction)
                 novel?.sourceUrl?.let { openWeb(it) }

@@ -47,6 +47,8 @@ data class ReaderSettings(
     val showImages: Boolean = true,
     /** 自動スクロールの速さ（READ-12）。1（遅い）〜10（速い） */
     val autoSpeed: Int = 5,
+    /** 話の頭にタイトルを出すか */
+    val showTitle: Boolean = true,
 )
 
 /** 背景色プリセット（UI-03：6種類） */

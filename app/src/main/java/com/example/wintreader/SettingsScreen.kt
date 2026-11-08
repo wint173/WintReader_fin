@@ -128,7 +128,10 @@ fun SettingsScreen(onClose: () -> Unit) {
                 ThemeMode.entries.forEach { m ->
                     RadioRow(m.label, prefs.theme == m) { update(prefs.copy(theme = m)) }
                 }
-                Note("読書画面の色は、読書中のメニューの表示設定で選びます。")
+                Section("テーマの色")
+                ThemeColorGrid(prefs) { update(it) }
+                AmoledRow(prefs) { update(it) }
+                Note("鉛筆の丸で好きな色を作れます。読書画面の色は、読書中のメニューの表示設定で選びます。")
 
                 Section("本棚に追加したあと")
                 AfterAddAction.entries.forEach { a ->
