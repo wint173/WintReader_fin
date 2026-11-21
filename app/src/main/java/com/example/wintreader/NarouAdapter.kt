@@ -1,6 +1,11 @@
 package com.example.wintreader
 
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 
@@ -81,7 +86,7 @@ class NarouAdapter(private val http: SiteHttp) : SiteAdapter {
                         title = a.text().trim(),
                         url = href,
                         sectionTitle = section,
-                        updatedText = child.selectFirst(".p-eplist__update")?.ownText()?.trim(),
+                        updatedText = child.selectFirst(".p-eplist__update")?.text()?.trim(),
                     )
                 }
             }
@@ -107,6 +112,32 @@ class NarouAdapter(private val http: SiteHttp) : SiteAdapter {
             // 応答は [{"allcount":1},{"general_all_no":286}] の形
             Regex(""""general_all_no"\s*:\s*(\d+)""").find(http.get(url))?.groupValues?.get(1)?.toInt()
         }.getOrNull()
+    }
+
+    /**
+     * 公式 API は ncode をハイフンでつなぐと、何作品分でも1回で返す（1回で最大 500 件。ここでは 100 作品ずつ）。
+     * 応答は [{"allcount":3},{"ncode":"N0233MZ","general_all_no":30}, …] の形（2026-11-22 に確認）
+     */
+    override suspend fun fetchEpisodeCounts(refs: List<WorkRef>): Map<WorkRef, Int> {
+        val out = mutableMapOf<WorkRef, Int>()
+        refs.groupBy { it.siteId }.forEach { (siteId, list) ->
+            val api = if (siteId == SITE_R18) "novel18api" else "novelapi"
+            list.chunked(100).forEach { chunk ->
+                val url = "https://api.syosetu.com/$api/api/?out=json&of=n-ga&lim=500&ncode=" +
+                    chunk.joinToString("-") { it.workId }
+                val body = runCatching { http.get(url) }.getOrNull() ?: return@forEach
+                val byNcode = chunk.associateBy { it.workId.lowercase() }
+                runCatching {
+                    Json.parseToJsonElement(body).jsonArray.drop(1).forEach { e ->
+                        val o = e.jsonObject
+                        val ncode = o["ncode"]?.jsonPrimitive?.content?.lowercase() ?: return@forEach
+                        val count = o["general_all_no"]?.jsonPrimitive?.intOrNull ?: return@forEach
+                        byNcode[ncode]?.let { out[it] = count }
+                    }
+                }
+            }
+        }
+        return out
     }
 
     // ------------------------------------------------ 本文

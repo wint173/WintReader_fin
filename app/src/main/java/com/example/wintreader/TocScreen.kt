@@ -35,6 +35,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -87,6 +89,9 @@ fun TocScreen(
     val scope = rememberCoroutineScope()
     val bookmarkedChapters = bookmarks.map { it.chapterId }.toSet()
     val titleOf = chapters.associate { it.chapterId to it.title }
+    val settings = LocalContext.current.appContainer.settingsStore
+    val showDatesFlow = remember { settings.tocShowDates }
+    val showDates by showDatesFlow.collectAsState(initial = false)
 
     Surface(Modifier.fillMaxSize()) {
         Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -123,22 +128,31 @@ fun TocScreen(
                         )
                     }
                 }
-                // すべての話の既読・未読をまとめて付け替える
-                if (onMarkRead != null) {
+                // 各話の更新日の表示の切り替えと、すべての話の既読・未読の付け替え
+                run {
                     var moreOpen by remember { mutableStateOf(false) }
                     Box {
                         IconButton(onClick = { moreOpen = true }) {
-                            Icon(WIcons.More, contentDescription = "既読の管理", modifier = Modifier.size(24.dp))
+                            Icon(WIcons.More, contentDescription = "目次のメニュー", modifier = Modifier.size(24.dp))
                         }
                         DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
                             DropdownMenuItem(
-                                text = { Text("すべて既読にする") },
-                                onClick = { moreOpen = false; onMarkRead(null, LibraryRepository.ReadMark.ALL_READ) },
+                                text = { Text(if (showDates) "各話の更新日を隠す" else "各話の更新日を表示する") },
+                                onClick = {
+                                    moreOpen = false
+                                    scope.launch { settings.saveTocShowDates(!showDates) }
+                                },
                             )
-                            DropdownMenuItem(
-                                text = { Text("すべて未読にする") },
-                                onClick = { moreOpen = false; onMarkRead(null, LibraryRepository.ReadMark.ALL_UNREAD) },
-                            )
+                            if (onMarkRead != null) {
+                                DropdownMenuItem(
+                                    text = { Text("すべて既読にする") },
+                                    onClick = { moreOpen = false; onMarkRead(null, LibraryRepository.ReadMark.ALL_READ) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("すべて未読にする") },
+                                    onClick = { moreOpen = false; onMarkRead(null, LibraryRepository.ReadMark.ALL_UNREAD) },
+                                )
+                            }
                         }
                     }
                 }
@@ -199,6 +213,8 @@ fun TocScreen(
                     bookmarkedChapters = bookmarkedChapters,
                     onOpenChapter = onOpenChapter,
                     onMarkRead = onMarkRead,
+                    showDates = showDates,
+                    canRefresh = onRefresh != null,
                 )
             } else {
                 if (bookmarks.isEmpty()) {
@@ -273,6 +289,8 @@ private fun ChapterList(
     bookmarkedChapters: Set<String>,
     onOpenChapter: (String) -> Unit,
     onMarkRead: ((ChapterEntity?, LibraryRepository.ReadMark) -> Unit)?,
+    showDates: Boolean,
+    canRefresh: Boolean,
 ) {
     // 開いた時点で、今読んでいる話が見える位置までスクロールしておく
     val listState = rememberLazyListState()
@@ -280,8 +298,22 @@ private fun ChapterList(
         val index = chapters.indexOfFirst { it.chapterId == currentChapterId }
         if (index > 2) listState.scrollToItem(index - 2)
     }
+    // 更新日を出す設定なのに、どの話にも日付がない（前の版で取り込んだ作品・日付の無いサイト）
+    val noDates = showDates && chapters.isNotEmpty() && chapters.none { it.updatedText != null }
 
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
+        if (noDates) {
+            item(key = "no-dates") {
+                Text(
+                    if (canRefresh) "更新日はまだありません。右上の更新ボタンで目次を取り直すと表示されます。"
+                    else "この作品のサイトには、話ごとの更新日がありません。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+                HorizontalDivider()
+            }
+        }
         items(chapters, key = { it.id }) { ch ->
             val prevSection = chapters.getOrNull(ch.order - 1)?.sectionTitle
             // 章の見出し（TOC-04）
@@ -312,14 +344,23 @@ private fun ChapterList(
                     )
                     .padding(horizontal = 16.dp, vertical = 14.dp),
             ) {
-                Text(
-                    ch.title,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    fontWeight = if (ch.isRead) FontWeight.Normal else FontWeight.Bold,
-                    color = if (ch.isRead) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                )
+                Column(Modifier.weight(1f)) {
+                    // 長い話のタイトルも省略せず、折り返して全部出す
+                    Text(
+                        ch.title,
+                        fontWeight = if (ch.isRead) FontWeight.Normal else FontWeight.Bold,
+                        color = if (ch.isRead) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    )
+                    // 各話の更新日（目次の「…」でオンにしたとき）
+                    if (showDates && ch.updatedText != null) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            ch.updatedText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (bookmarkedChapters.contains(ch.chapterId)) {
                     Text(
                         "栞",

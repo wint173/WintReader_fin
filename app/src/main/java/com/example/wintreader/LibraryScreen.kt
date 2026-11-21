@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -32,6 +34,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -55,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.text.Collator
 import java.text.SimpleDateFormat
@@ -94,14 +98,45 @@ fun relativeTime(at: Long?, now: Long = System.currentTimeMillis()): String {
     }
 }
 
+/**
+ * カテゴリの親子関係。top = いちばん上のカテゴリ、childrenOf = その中のサブカテゴリ（どちらも displayOrder 順）。
+ * 親が消えている・2段より深いなど、想定外の形のものは top に入れて、作品が見えなくならないようにする
+ */
+class CategoryTree private constructor(
+    val top: List<CategoryEntity>,
+    private val children: Map<Long, List<CategoryEntity>>,
+) {
+    fun childrenOf(id: Long): List<CategoryEntity> = children[id].orEmpty()
+
+    companion object {
+        fun of(categories: List<CategoryEntity>): CategoryTree {
+            val ids = categories.map { it.id }.toSet()
+            val roots = categories.filter { it.parentId == null || it.parentId !in ids || it.parentId == it.id }
+            val rootIds = roots.map { it.id }.toSet()
+            val subs = categories.filter { it.parentId in rootIds && it !in roots }
+            val rest = categories - roots.toSet() - subs.toSet()
+            return CategoryTree(
+                top = (roots + rest).sortedBy { it.displayOrder },
+                children = subs.groupBy { it.parentId!! }.mapValues { (_, v) -> v.sortedBy { it.displayOrder } },
+            )
+        }
+    }
+}
+
 /** 本棚で開いているダイアログ */
 private sealed interface LibraryDialog {
     data class ConfirmDelete(val novel: NovelEntity) : LibraryDialog
     data class MoveNovel(val novel: NovelEntity) : LibraryDialog
-    data object AddCategory : LibraryDialog
+    /** parent があれば、そのカテゴリの中にサブカテゴリを足す */
+    data class AddCategory(val parent: CategoryEntity? = null) : LibraryDialog
     data class RenameCategory(val category: CategoryEntity) : LibraryDialog
     data class ConfirmDeleteCategory(val category: CategoryEntity) : LibraryDialog
+    /** カテゴリごとの更新確認の結果 */
+    data class UpdateResult(val categoryName: String, val result: UpdateCheckResult) : LibraryDialog
 }
+
+/** カテゴリごとの更新確認の進み具合 */
+private data class BatchCheck(val categoryName: String, val done: Int, val total: Int)
 
 // ---------------------------------------------------------------- 本棚
 
@@ -145,6 +180,30 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
     var query by remember { mutableStateOf("") }
     var dialog by remember { mutableStateOf<LibraryDialog?>(null) }
     var sortMenu by remember { mutableStateOf(false) }
+    // カテゴリごとの更新確認（同時には1つだけ）。本棚の画面を離れると止まる
+    var batch by remember { mutableStateOf<BatchCheck?>(null) }
+    var batchJob by remember { mutableStateOf<Job?>(null) }
+
+    /** カテゴリ（いちばん上なら、その中のサブカテゴリも）の作品の更新をまとめて確かめる */
+    fun checkCategory(category: CategoryEntity, tree: CategoryTree) {
+        if (batchJob?.isActive == true) return
+        val ids = setOf(category.id) + tree.childrenOf(category.id).map { it.id }
+        val targets = novels.filter { it.categoryId in ids }.map { it.id }
+        if (targets.isEmpty()) {
+            Toast.makeText(context, "「${category.name}」に作品がありません", Toast.LENGTH_SHORT).show()
+            return
+        }
+        batch = BatchCheck(category.name, 0, targets.size)
+        batchJob = scope.launch {
+            // 「やめる」で取り消したときは結果を出さない（途中までに取り直した目次はそのまま残る）
+            try {
+                val result = repo.checkUpdatesFor(targets) { done, total -> batch = BatchCheck(category.name, done, total) }
+                dialog = LibraryDialog.UpdateResult(category.name, result)
+            } finally {
+                batch = null
+            }
+        }
+    }
 
     // 本棚内の検索（LIB-07）：タイトルと作者名
     val visible = if (query.isBlank()) novels else novels.filter {
@@ -153,6 +212,10 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
     val categoryIds = categories.map { it.id }.toSet()
     val uncategorized = visible.filter { it.categoryId == null || it.categoryId !in categoryIds }
         .sortedByMode(librarySort)
+    // カテゴリを「いちばん上」と「その中のサブカテゴリ（1段だけ）」に分ける。
+    // 親が見つからないもの・2段より深いものは、いちばん上として出す（作品が見えなくならないように）
+    val tree = remember(categories) { CategoryTree.of(categories) }
+    fun sortOf(c: CategoryEntity) = runCatching { SortMode.valueOf(c.sortMode) }.getOrDefault(SortMode.RECENT)
 
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -169,7 +232,7 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
                         modifier = Modifier.size(24.dp),
                     )
                 }
-                TextButton(onClick = { dialog = LibraryDialog.AddCategory }) { Text("＋カテゴリ") }
+                TextButton(onClick = { dialog = LibraryDialog.AddCategory() }) { Text("＋カテゴリ") }
                 Box {
                     TextButton(onClick = { sortMenu = true }) { Text(librarySort.label) }
                     DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
@@ -197,64 +260,99 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 4.dp),
         )
 
-        LazyColumn(Modifier.fillMaxSize()) {
-            categories.forEachIndexed { index, category ->
-                val inCategory = visible.filter { it.categoryId == category.id }
-                    .sortedByMode(runCatching { SortMode.valueOf(category.sortMode) }.getOrDefault(SortMode.RECENT))
-                // 検索中は、該当する作品があるカテゴリだけを開いて表示する
-                if (query.isNotBlank() && inCategory.isEmpty()) return@forEachIndexed
-                val expanded = category.isExpanded || query.isNotBlank()
+        // カテゴリごとの更新確認の進み具合と「やめる」
+        batch?.let { b ->
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "「${b.categoryName}」の更新を確認中　${b.done}/${b.total}",
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { batchJob?.cancel() }) { Text("やめる") }
+                }
+                LinearProgressIndicator(
+                    progress = { if (b.total == 0) 0f else b.done.toFloat() / b.total },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
 
+        LazyColumn(Modifier.fillMaxSize()) {
+            // カテゴリの見出し1つ分。siblings は同じ親の中の並び（上へ・下へ移動はこの中で入れ替える）
+            fun header(category: CategoryEntity, siblings: List<CategoryEntity>, count: Int, expanded: Boolean, level: Int) {
+                val index = siblings.indexOf(category)
                 item(key = "cat-${category.id}") {
                     CategoryHeader(
                         category = category,
-                        count = inCategory.size,
+                        count = count,
                         expanded = expanded,
+                        level = level,
                         canMoveUp = index > 0,
-                        canMoveDown = index < categories.lastIndex,
+                        canMoveDown = index < siblings.lastIndex,
                         onToggle = { scope.launch { repo.updateCategory(category.copy(isExpanded = !category.isExpanded)) } },
                         onRename = { dialog = LibraryDialog.RenameCategory(category) },
                         onSortChange = { m -> scope.launch { repo.updateCategory(category.copy(sortMode = m.name)) } },
                         onMove = { delta ->
-                            val list = categories.toMutableList()
+                            val list = siblings.toMutableList()
                             val target = index + delta
                             if (target in list.indices) {
                                 list.add(target, list.removeAt(index))
                                 scope.launch { repo.reorderCategories(list) }
                             }
                         },
+                        // サブカテゴリの中には、さらにサブカテゴリを作らない（1段だけ）
+                        onAddSub = if (level == 0) ({ dialog = LibraryDialog.AddCategory(parent = category) }) else null,
+                        checking = batch != null,
+                        onCheckUpdates = { checkCategory(category, tree) },
                         onDelete = { dialog = LibraryDialog.ConfirmDeleteCategory(category) },
                     )
                 }
+            }
+
+            fun novelRows(list: List<NovelEntity>, level: Int) {
+                items(list, key = { "novel-${it.id}" }) { novel ->
+                    NovelRow(
+                        novel = novel,
+                        stats = stats[novel.id],
+                        fullTitle = fullTitles,
+                        level = level,
+                        onOpen = { onOpenNovel(novel.id) },
+                        onMove = { dialog = LibraryDialog.MoveNovel(novel) },
+                        onDelete = { dialog = LibraryDialog.ConfirmDelete(novel) },
+                        onCheckUpdate = { checkUpdate(novel) },
+                    )
+                }
+            }
+
+            tree.top.forEach { category ->
+                val subs = tree.childrenOf(category.id)
+                val direct = visible.filter { it.categoryId == category.id }.sortedByMode(sortOf(category))
+                val inSubs = subs.associate { s -> s.id to visible.filter { it.categoryId == s.id }.sortedByMode(sortOf(s)) }
+                // 数はサブカテゴリの中の作品も含める
+                val total = direct.size + inSubs.values.sumOf { it.size }
+                // 検索中は、該当する作品があるカテゴリだけを開いて表示する
+                if (query.isNotBlank() && total == 0) return@forEach
+                val expanded = category.isExpanded || query.isNotBlank()
+
+                header(category, tree.top, total, expanded, level = 0)
                 if (expanded) {
-                    items(inCategory, key = { "novel-${it.id}" }) { novel ->
-                        NovelRow(
-                            novel = novel,
-                            stats = stats[novel.id],
-                            fullTitle = fullTitles,
-                            indent = true,
-                            onOpen = { onOpenNovel(novel.id) },
-                            onMove = { dialog = LibraryDialog.MoveNovel(novel) },
-                            onDelete = { dialog = LibraryDialog.ConfirmDelete(novel) },
-                            onCheckUpdate = { checkUpdate(novel) },
-                        )
+                    // サブカテゴリを先に、そのあとにこのカテゴリに直接入っている作品を並べる
+                    subs.forEach { sub ->
+                        val list = inSubs[sub.id].orEmpty()
+                        if (query.isNotBlank() && list.isEmpty()) return@forEach
+                        val subExpanded = sub.isExpanded || query.isNotBlank()
+                        header(sub, subs, list.size, subExpanded, level = 1)
+                        if (subExpanded) novelRows(list, level = 2)
                     }
+                    novelRows(direct, level = 1)
                 }
             }
 
             // 未分類の作品はフォルダに入れず、すべてのカテゴリより下に直接並べる（LIB-36, 37）
-            items(uncategorized, key = { "novel-${it.id}" }) { novel ->
-                NovelRow(
-                    novel = novel,
-                    stats = stats[novel.id],
-                    fullTitle = fullTitles,
-                    indent = false,
-                    onOpen = { onOpenNovel(novel.id) },
-                    onMove = { dialog = LibraryDialog.MoveNovel(novel) },
-                    onDelete = { dialog = LibraryDialog.ConfirmDelete(novel) },
-                    onCheckUpdate = { checkUpdate(novel) },
-                )
-            }
+            novelRows(uncategorized, level = 0)
 
             if (novels.isEmpty()) {
                 item {
@@ -287,8 +385,12 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
             onDismissRequest = { dialog = null },
             title = { Text("カテゴリを選ぶ") },
             text = {
-                Column {
-                    (listOf<CategoryEntity?>(null) + categories).forEach { c ->
+                // カテゴリが多いと画面に収まらないので、中だけスクロールできるようにする
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    // 未分類 → カテゴリ → その中のサブカテゴリ（字下げ）の順
+                    val choices = listOf<Pair<CategoryEntity?, Int>>(null to 0) +
+                        tree.top.flatMap { top -> listOf(top to 0) + tree.childrenOf(top.id).map { it to 1 } }
+                    choices.forEach { (c, level) ->
                         val selected = d.novel.categoryId == c?.id
                         Text(
                             text = (if (selected) "● " else "○ ") + (c?.name ?: "未分類"),
@@ -298,7 +400,7 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
                                     dialog = null
                                     scope.launch { repo.setCategory(d.novel.id, c?.id) }
                                 }
-                                .padding(vertical = 12.dp),
+                                .padding(start = (level * 20).dp, top = 12.dp, bottom = 12.dp),
                         )
                     }
                 }
@@ -306,13 +408,17 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
             confirmButton = { TextButton(onClick = { dialog = null }) { Text("閉じる") } },
         )
 
-        LibraryDialog.AddCategory -> NameDialog(
-            title = "カテゴリを追加",
+        is LibraryDialog.AddCategory -> NameDialog(
+            title = if (d.parent == null) "カテゴリを追加" else "「${d.parent.name}」にサブカテゴリを追加",
             initial = "",
             onDismiss = { dialog = null },
             onConfirm = { name ->
                 dialog = null
-                scope.launch { repo.addCategory(name) }
+                scope.launch {
+                    repo.addCategory(name, parentId = d.parent?.id)
+                    // 足したサブカテゴリが見えるように、親を開いておく
+                    if (d.parent != null && !d.parent.isExpanded) repo.updateCategory(d.parent.copy(isExpanded = true))
+                }
             },
         )
 
@@ -329,7 +435,17 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
         is LibraryDialog.ConfirmDeleteCategory -> AlertDialog(
             onDismissRequest = { dialog = null },
             title = { Text("カテゴリを削除") },
-            text = { Text("「${d.category.name}」を削除します。中の作品は未分類に戻ります（作品は消えません）。") },
+            text = {
+                val parent = categories.firstOrNull { it.id == d.category.parentId }
+                val hasSubs = tree.childrenOf(d.category.id).isNotEmpty()
+                Text(
+                    when {
+                        parent != null -> "「${d.category.name}」を削除します。中の作品は「${parent.name}」に移ります（作品は消えません）。"
+                        hasSubs -> "「${d.category.name}」と、その中のサブカテゴリを削除します。中の作品はすべて未分類に戻ります（作品は消えません）。"
+                        else -> "「${d.category.name}」を削除します。中の作品は未分類に戻ります（作品は消えません）。"
+                    }
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     dialog = null
@@ -337,6 +453,51 @@ fun LibraryScreen(onOpenNovel: (String) -> Unit) {
                 }) { Text("削除", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { dialog = null }) { Text("やめる") } },
+        )
+
+        is LibraryDialog.UpdateResult -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("「${d.categoryName}」の更新確認") },
+            text = {
+                val r = d.result
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        if (r.updated.isEmpty()) "${r.checked}作品を確かめました。新しい話はありません。"
+                        else "${r.checked}作品を確かめました。${r.updated.size}作品に新しい話があります。",
+                    )
+                    r.updated.forEach { (novel, added) ->
+                        Text(
+                            "・${novel.title}（＋${added}話）",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    if (r.failed.isNotEmpty()) {
+                        Text("確かめられなかった作品（${r.failed.size}）", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                        r.failed.forEach { (novel, reason) ->
+                            Text(
+                                "・${novel.title}：$reason",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                    }
+                    if (r.notSupported > 0) {
+                        Text(
+                            "青空文庫などの${r.notSupported}作品は、更新がないので確かめていません。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { dialog = null }) { Text("閉じる") } },
         )
 
         null -> Unit
@@ -366,12 +527,19 @@ private fun CategoryHeader(
     category: CategoryEntity,
     count: Int,
     expanded: Boolean,
+    /** 0 = いちばん上のカテゴリ、1 = サブカテゴリ（字下げして少し薄く出す） */
+    level: Int,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
     onToggle: () -> Unit,
     onRename: () -> Unit,
     onSortChange: (SortMode) -> Unit,
     onMove: (Int) -> Unit,
+    /** サブカテゴリを足す（サブカテゴリの見出しでは null） */
+    onAddSub: (() -> Unit)?,
+    /** どこかのカテゴリの更新確認が動いている間は、ほかを始めない */
+    checking: Boolean,
+    onCheckUpdates: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -380,8 +548,8 @@ private fun CategoryHeader(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onToggle)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (level == 0) 0.5f else 0.25f))
+            .padding(start = (16 + level * 16).dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
     ) {
         Text(if (expanded) "▼" else "▶", style = MaterialTheme.typography.labelMedium)
         Spacer(Modifier.width(8.dp))
@@ -394,7 +562,13 @@ private fun CategoryHeader(
         Box {
             TextButton(onClick = { menu = true }) { Text("…") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(
+                    text = { Text(if (level == 0) "更新を確認（サブカテゴリも）" else "更新を確認") },
+                    enabled = !checking,
+                    onClick = { menu = false; onCheckUpdates() },
+                )
                 DropdownMenuItem(text = { Text("名前を変更") }, onClick = { menu = false; onRename() })
+                if (onAddSub != null) DropdownMenuItem(text = { Text("サブカテゴリを追加") }, onClick = { menu = false; onAddSub() })
                 SortMode.entries.forEach { m ->
                     val current = category.sortMode == m.name
                     DropdownMenuItem(
@@ -422,7 +596,8 @@ private fun NovelRow(
     stats: ChapterStats?,
     /** 長い作品名を折り返して全部出すか */
     fullTitle: Boolean,
-    indent: Boolean,
+    /** 字下げの段数（0 = 未分類、1 = カテゴリの中、2 = サブカテゴリの中） */
+    level: Int,
     onOpen: () -> Unit,
     onMove: () -> Unit,
     onDelete: () -> Unit,
@@ -539,7 +714,7 @@ private fun NovelRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 76.dp)
-                    .padding(start = if (indent) 32.dp else 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+                    .padding(start = (16 + level * 16).dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
             ) {
                 Text(
                     novel.title,

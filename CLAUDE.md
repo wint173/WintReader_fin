@@ -1,88 +1,54 @@
-# Wint Reader
+# Wint Reader — Claude Code 用メモ
 
-iOSアプリ「携帯小説⑩」の読書体験を再現する、個人利用のAndroid小説リーダー。
-仕様の正本は claude.ai の要件定義書「Android版「携帯小説⑩」再現アプリ 要件定義書」（v1.1以降）。
+iOS アプリ「携帯小説⑩」の読書体験を再現する、**個人利用**の Android 小説リーダー。
+オーナーは冬輝（日本語でやりとりする。説明・コメント・UI 文言はすべて日本語、平易な言葉で）。
 
-## 決定事項（要約）
+- 仕様の正本：claude.ai の Claude Docs「Android版「携帯小説⑩」再現アプリ 要件定義書」（v1.1 以降、doc id 63517ee2-8d20-4400-b458-119761e5c4f4）。
+  要件 ID（READ-12、LIB-09、CACHE-04 など）はこの文書のもの。手元に無いときは docs/ とコードのコメントを正とする
+- **続きから始めるときは、まず docs/HANDOFF.md を読む**（どこまで終わっていて、何が実機確認待ちか、次に何をするか）
+- 構成・各ファイルの役割：docs/ARCHITECTURE.md
+- ビルド・配布・作業の流れ：docs/DEVELOPMENT.md
 
-- 対応サイト：小説家になろう系（ノクターン等含む）・カクヨム・ハーメルン・アルファポリス・ノベルアップ＋・pixiv 小説・
-  青空文庫・Project Gutenberg（ManyBooks は会員登録が要り意味がないので外した）。文庫タブは並び順・表示を「編集」で変えられる
-- 本文はサイトから取得 → 共通本文モデル（NovelDocument）に変換 → 端末に保存 → アプリが生成したHTMLをWebViewで描画
-- **横書きのみ**（縦書きは対応しない）
-- タップ判定はKotlin側（GestureDetector）。左タップ＝次ページ、右タップ＝前ページ、中央＝メニュー
-- スクロールモードではスクロールをWebViewに任せ、中央タップだけ拾う
-- 読書位置はページ番号ではなく {block, offset}（ルビの読みは数えず親文字だけ数える）
-- 栞はページ単位（リーダーのツールバーから付け外し）
-- ページめくりのアニメーション：折り返し（初期値）／スライド／なし。折り返しは transform だけで動かす
-  （clip-path を毎フレーム変えると実機で描画が欠けるため。切り抜きは回転した overflow:hidden の箱で行う）
-- スワイプモード：指の追従だけは reader.js（JavaScript）で行う例外。上1/3は右上の角、下1/3は右下の角、中央は縦の折り目
-- 話の切り替え：話の端で「引っ張って離す」（スクロール・スワイプ）か「2回タップ」。本文をずらして矢印＋話のタイトルを薄く表示
-- 話を変えても ReaderScreen（WebView）は作り直さず、Reader.switchChapter で演出付きに差し替える（メニューは開いたまま）
-- 中央タップのメニュー：最初はページのスライダーと前後の話。表示設定は一段下
-- ツールは図のアイコン（Icons.kt の WIcons。アイコンのライブラリは使わない）。上：本棚へ・自動スクロール・月（夜の配色）・ルーペ（本文内検索）・地球儀（元サイトのこの話）・栞（タイトルは置かない）。
-  下はシンプルに：目次（左下）・前後の話・表示設定、いちばん下に小さく「話のタイトル　30/81話」。表示設定の選択肢も図（明るさ・自動スクロールの速さ・画面の向きもここ）
-- 最初の話の前・最終話の次：いつも「更新を確認」（選択肢はなくした）。案内は話の端の矢印の場所に印と言葉で出し、
-  結果も同じ場所に出す（Reader.showNotice）
-- 本棚：作品を左へずらすと移動・削除、右へずらして離すと更新確認
+## 守ること（安全・方針）
 
-## 構成
+- 個人利用のアプリ。**年齢確認・ログイン・アクセス制限・WAF（AWS WAF など）を回避するコードは書かない**。
+  必要なら利用者本人がアプリ内ブラウザで確認を済ませ、その Cookie を共有して使う（Http.kt の SiteHttp）
+- サイトへの通信は同じホストに間隔を空ける（SiteHttp.MIN_INTERVAL_MS）。必要な話だけ取る
+- 署名の鍵（signing/、*.jks、keystore.properties）とパスワードは**絶対にコミットしない**（.gitignore 済み）。
+  鍵・トークン・パスワードを Claude が入力・表示しない
+- 「なろうグループの R-18」についての説明文は UI・ヘルプに書かない（オーナーの指示）
 
-- `app/src/main/assets/reader/` … 本文表示エンジン（reader.html / reader.css / reader.js）。Kotlinからは `window.Reader`、JSからは `ReaderBridge` で通信
-- `app/src/main/java/com/example/wintreader/` … Kotlin。**ファイルはこの階層に平置きする**
-  （Claudeの作業環境が、接続フォルダから7階層より深いファイルを読み書きできないため。サブパッケージのフォルダは作らない）
+## コードの決まり
 
-## 技術スタック
+- Kotlin のファイルは `app/src/main/java/com/example/wintreader/` に**平置き**（サブパッケージを作らない）。
+  `ui/theme` フォルダは使わない（テーマは AppTheme.kt）
+- アイコンはライブラリを使わず Icons.kt の `WIcons`（24×24 の線画を ImageVector で描く）に足す
+- コメントと UI 文言は日本語。要件 ID をコメントに残す（例：`// READ-15`）
+- 画面移動は自前（Navigation Compose は不使用）。AppRoot.kt が画面を切り替える
+- リーダーの本文表示は WebView 内の独自エンジン（assets/reader/）。**横書きのみ**（縦書きは対応しない）
+- reader.js / reader.css を変えたら、Playwright + Chromium で動きを確かめてから実機へ。
+  実機の描画は遅いので、アニメーション中に大きな要素を描き直す作りは避ける（transform だけで動かす。clip-path を毎フレーム変えない）
 
-Kotlin / Jetpack Compose / WebView（androidx.webkit の WebViewAssetLoader）/ kotlinx.serialization。
-M2以降：Room、DataStore、OkHttp、Jsoup、WorkManager。minSdk 29。
+## 主な決定事項（要約）
 
-## マイルストーン
-
-- M1 独自リーダー（サンプル本文）… 完了
-- M2 本棚・目次・栞 … 完了（Room 2.8.5 / DataStore 1.3.0 / KSP 2.3.11。画面移動は自前、Navigation Compose は不使用）
-- M3 文庫タブ・なろう系 … 完了
-- （M3のあとの UI 改善：図のアイコン・話の端の動作・ルーペ・本棚の右スライド）
-- M4 カクヨム・ハーメルン … 完了
-  （Sites.kt に SiteAdapter / SiteRegistry / HtmlConverter。サイトごとに NarouAdapter・KakuyomuAdapter・HamelnAdapter。
-  カクヨムの目次は __NEXT_DATA__ の JSON、ハーメルンは .episode-list。年齢確認はアプリ内ブラウザで本人が行い、回避はしない）
-- M5 仕上げ ← 進行中
-  - 1：ヘルプ（読書メーター・使い方）・設定画面（テーマ・追加後の動作・先読み話数・保存した本文・バックアップ・読書記録・全削除）
-    … 実装済み・実機確認待ち。テーマは AppTheme.kt の WintTheme（ui/theme は深すぎて触れないため使わない）
-  - 追加サイト（M5 中に追加）：MoreAdapters.kt（ノベルアップ＋・アルファポリス・pixiv）、BookAdapters.kt（青空文庫・Gutenberg。
-    1冊の HTML を見出しで話に分ける）。ノベルアップ＋は AWS WAF の確認が出ることがあり、そのときは SiteChallengeException で
-    「アプリ内ブラウザで一度開いて」と案内する（回避はしない）… 実装済み・実機確認待ち
-  - 2：長文対応 … 折り返しめくりの複製を「めくる2ページ分」だけにした（partialClone。上に空きを入れて段組みを元と揃える）。
-    CPU 1/6 の模擬で 20万字：最初のめくり 7秒→0.1秒、組み直し 9秒→2.5秒。読み込みは約4秒（列組みの都合）
-  - 3：上のツールに月（夜の配色 UI-11）、表示設定に画面の向き（UI-06）と明るさ（UI-04）、
-    目次に全話の保存（CACHE-04/10/13/15。止めても続きから）。アプリアイコン（開いた本＋栞）… 実装済み・実機確認待ち
-  - 4：本棚に「43/120話」と「未読N」（LIB-09。ChapterDao.observeStats）… 実装済み・実機確認待ち
-  - 5：自動スクロール（READ-12。動いている間だけスクロール操作に切り替え、止めたら元の操作に戻す。速さ 1〜10 は毎秒約0.15〜4.2行）、本文内検索（READ-15。今の話だけ。Reader.search/showHit、
-    .search-hit の帯は partialClone から除く）、外部ブラウザ（READ-23。アプリ内ブラウザの右上）… 実装済み・実機確認待ち
-  - 6：サンプル作品とカテゴリ（ファンタジー・日常）を初回起動時に一度だけ片付ける（removeSampleData）。
-    目次で既読・未読をまとめて付け替え（話の長押し：ここまで既読・ここから未読・この話だけ、右上「…」：すべて既読・未読）… 実装済み・実機確認待ち
-  - 7（友人のレビュー対応）：スクロール操作ではどこをタップしてもメニュー、スクロール操作の話の切り替えは縦に流す、
-    話の先頭（block 0, offset 0）はタイトルも見える一番上から表示（タイトルは常に表示）。表示設定の「題名」「話の端」は削除し、話の端はいつも更新確認… 実装済み・実機確認待ち
-  - 8：アプリ内ブラウザ：読み込み中はテーマの面の色を敷き、描けてからふわっと出す（白く光らない）。useWideViewPort / loadWithOverviewMode を有効、
-    デバッグ版は chrome://inspect で調べられる（なろうランキングの右から出るメニュー対策。原因は未確認）。
-    テーマの色（AccentPreset：端末の色・ホワイト・クリムゾン・オーシャン・バイオレット・エメラルド・アンバー・ローズ・カスタム）と AMOLED ブラック。
-    1色から配色を作るのは AppTheme.kt の seededScheme、選ぶ画面は ThemePicker.kt … 実装済み・実機確認待ち
-  - 残り候補（P1）：LIB-08 一括操作、LIB-05 読了の印、UPD-06 消えた作品の表示、CACHE-09 改稿の取り直し、WEB-06 追加前の作品情報
-
-## GitHub・配布
-
-- 公開リポジトリ。main への push で GitHub Actions（.github/workflows/build-apk.yml）が debug 版 APK を作り、Releases に WintReader.apk を置く
-  （最新版：releases/latest/download/WintReader.apk）。versionCode = 実行番号 + 1、versionName = 1.0.<実行番号>
-- 署名：PC は keystore.properties ＋ signing/wint.jks、GitHub は Secrets（SIGNING_KEYSTORE_BASE64 ほか3つ）。同じ鍵なので上書き更新できる。
-  鍵ファイル・パスワードは .gitignore 済みで、絶対にコミットしない
-- アプリ内アップデート（Updater.kt）：GitHub API の releases/latest を見て、タグ build-<N> の N+1 が今の versionCode より大きければ
-  ダイアログを出す（起動時は半日に1回、設定からも確認可）。APK は cache/updates/ にダウンロードし、FileProvider（<applicationId>.updates）で
-  インストール画面へ渡す。リポジトリ名は BuildConfig.GITHUB_REPO（CI は GITHUB_REPOSITORY、PC は .git/config の origin から読む。分からなければ空で確認しない）。
-  PC ビルドは versionCode 1 なので、GitHub の版があれば必ず「新しい版」と出る（同じ鍵なので、そのまま GitHub の版に移れる）
-- .github フォルダは Claude のファイル操作では書けない（保護されている）。ワークフローを直すときは ci/ に置いて移してもらう
-
-## Claude 向けメモ
-
-- reader.js / reader.css はブラウザ（Playwright + Chromium）で検証してから書き込む。実機の描画は遅いので、
-  アニメーション中に大きな要素を描き直す作りは避ける
-- PC へのファイル書き込みは、毎回新しい置き場所（例：outputs/revN/）から送る。同じ置き場所から送り直すと
-  最初の内容が使い回されて更新されないことがあった
+- 対応サイト：小説家になろう系（ノクターン等含む）・カクヨム・ハーメルン・アルファポリス・ノベルアップ＋・pixiv 小説・青空文庫・Project Gutenberg
+  （ManyBooks は会員登録が要り外した）。文庫タブは「編集」で並び順と表示を変えられる。サイト説明は 50 字以内
+- 本文：サイトから取得 → 共通本文モデル（NovelDocument）→ 端末に保存 → reader.html で描画
+- 読書位置は {block, offset}（ルビの読みは数えない）。栞はページ単位
+- タップ判定は Kotlin（GestureDetector）。ページ操作は左タップ＝次（設定で逆にできる）、中央＝メニュー。
+  スクロール操作ではどこをタップしてもメニュー
+- めくり：折り返し（初期値）／スライド／なし。スワイプの指追従だけは reader.js 側
+- 話の切り替え：端で引っ張って離す or 2回タップ。WebView は作り直さず Reader.switchChapter（スクロール操作は縦、他は横に流す）
+- 話の先頭はタイトルも見える一番上から。タイトルは常に表示
+- 最初の話の前・最終話の次はいつも「更新を確認」（選択肢はなくした）。結果は端の矢印の場所に Reader.showNotice で出す
+- リーダー上のツール：本棚へ・自動スクロール・月（夜の配色）・ルーペ（本文内検索）・地球儀（元サイト）・栞。タイトルは置かない
+- リーダー下：スライダー、目次（左下）・前後の話・表示設定、いちばん下に小さく「話のタイトル　30/81話」
+- 表示設定は図のアイコンで選ぶ（明るさ・自動スクロールの速さ・操作・次へ・めくり・挿絵・向き・色）
+- 本棚：左スワイプで移動・削除、右スワイプで更新確認。「43/120話」と「未読N」。長い題名の折り返し切り替え。
+  カテゴリの中にサブカテゴリを1段だけ作れる（CategoryEntity.parentId）。
+  まとめての更新確認はカテゴリ単位だけ（「…」→「更新を確認」）。本棚全体を一度に確かめる機能は作らない（サイトへの負担）
+- データベース（Room）のスキーマを変えたら、必ず Migration を足す（足し忘れると本棚が消える）
+- アプリ内ブラウザの WebView は MATCH_PARENT を明示する（WRAP_CONTENT だとページの 100vh が 0 になる）
+- アプリのテーマ：明るさ（端末／ライト／ダーク）＋テーマの色（端末の色・ホワイト・クリムゾン・オーシャン・バイオレット・
+  エメラルド・アンバー・ローズ・カスタム）＋ AMOLED ブラック。読書画面の色は別（表示設定）
+- アプリ内アップデート：GitHub Releases の最新版を確認してインストール画面へ（Updater.kt）

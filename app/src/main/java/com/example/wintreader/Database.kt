@@ -13,6 +13,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 
@@ -65,6 +67,11 @@ data class ChapterEntity(
     val isRead: Boolean = false,
     /** 本文をファイルに保存済みか */
     val cached: Boolean = false,
+    /**
+     * 元サイトに載っている、この話の投稿・更新の日時（"2026/11/06 17:00"、改稿があれば "（2026/11/12 改稿）" を後ろに付ける）。
+     * 目次で表示できる（設定でオンのとき）。サイトに無い・まだ目次を取り直していない話は null
+     */
+    val updatedText: String? = null,
 )
 
 /** 本棚のカテゴリ（LIB-17〜38） */
@@ -78,6 +85,8 @@ data class CategoryEntity(
     val isExpanded: Boolean = true,
     /** カテゴリ内のソート方式（SortMode の名前） */
     val sortMode: String = SortMode.RECENT.name,
+    /** 親のカテゴリ。null = いちばん上のカテゴリ。サブカテゴリは1段だけ（サブカテゴリの中にはさらに作れない） */
+    val parentId: Long? = null,
 )
 
 /** 栞（ページ単位。中身は本文内の位置で持つ） */
@@ -132,6 +141,9 @@ interface NovelDao {
 
     @Query("UPDATE novels SET categoryId = NULL WHERE categoryId = :categoryId")
     suspend fun clearCategory(categoryId: Long)
+
+    @Query("UPDATE novels SET categoryId = :to WHERE categoryId = :from")
+    suspend fun moveCategory(from: Long, to: Long)
 
     @Query("DELETE FROM novels WHERE id = :id")
     suspend fun delete(id: String)
@@ -225,6 +237,9 @@ interface CategoryDao {
     @Query("DELETE FROM categories WHERE id = :id")
     suspend fun delete(id: Long)
 
+    @Query("SELECT * FROM categories WHERE parentId = :parentId")
+    suspend fun children(parentId: Long): List<CategoryEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(categories: List<CategoryEntity>)
 
@@ -263,7 +278,7 @@ interface BookmarkDao {
 
 @Database(
     entities = [NovelEntity::class, ChapterEntity::class, CategoryEntity::class, BookmarkEntity::class],
-    version = 1,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -273,9 +288,24 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bookmarks(): BookmarkDao
 
     companion object {
+        /** 1→2：サブカテゴリ用に categories.parentId を足す（今の本棚はそのまま残す） */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE categories ADD COLUMN parentId INTEGER DEFAULT NULL")
+            }
+        }
+
+        /** 2→3：目次に各話の更新日を出すために chapters.updatedText を足す */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chapters ADD COLUMN updatedText TEXT DEFAULT NULL")
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "wint_reader.db")
-                // 開発中はスキーマを変えたら作り直す（リリース前にマイグレーションへ切り替える）
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                // 用意していない版の変わり方のときだけ作り直す（本棚が消えるので、スキーマを変えたら必ずマイグレーションを足す）
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
     }

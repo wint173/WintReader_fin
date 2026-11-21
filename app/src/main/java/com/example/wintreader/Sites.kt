@@ -26,6 +26,36 @@ data class FetchedChapter(
     val updatedText: String?,
 )
 
+/**
+ * サイトごとに形の違う「話の更新日時」を、目次に出す形 "2026/11/06 17:00" にそろえる（日本時間）。
+ * - なろう："2026/11/06 17:00 （2026/11/12 09:43 改稿）" → "2026/11/06 17:00（2026/11/12 改稿）"
+ * - カクヨム："2026-11-06T08:00:00Z"（世界標準時）→ 日本時間に直す
+ * - ハーメルン：time 要素の datetime（時差付きならそれに従い、無ければ日本時間とみなす）
+ * 読み取れなければ null（でたらめな表示にしない）
+ */
+object UpdateDate {
+    private val JST = java.time.ZoneId.of("Asia/Tokyo")
+    private val OUT = java.time.format.DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm")
+    private val PLAIN = Regex("""(\d{4})[/-](\d{1,2})[/-](\d{1,2})[ T](\d{1,2}):(\d{2})""")
+    // かっこの中の日付だけを取る（かっこを見ないと、先頭の投稿日を改稿日と取り違える）
+    private val REVISED = Regex("""[（(]\s*(\d{4}/\d{1,2}/\d{1,2})[^）)]*改稿""")
+
+    fun normalize(raw: String?): String? {
+        val text = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val main = parseIso(text) ?: PLAIN.find(text)?.let { m ->
+            val (y, mo, d, h, mi) = m.destructured
+            runCatching { java.time.LocalDateTime.of(y.toInt(), mo.toInt(), d.toInt(), h.toInt(), mi.toInt()).format(OUT) }.getOrNull()
+        } ?: return null
+        val revised = REVISED.find(text)?.groupValues?.get(1)
+        return if (revised != null) "$main（$revised 改稿）" else main
+    }
+
+    /** 時差の付いた ISO 形式（2026-11-06T08:00:00Z / +09:00）なら日本時間に直す */
+    private fun parseIso(text: String): String? = runCatching {
+        java.time.OffsetDateTime.parse(text).atZoneSameInstant(JST).format(OUT)
+    }.getOrNull()
+}
+
 /** どのサイトのどの作品か */
 data class WorkRef(val siteId: String, val workId: String, val workUrl: String)
 
@@ -49,6 +79,13 @@ interface SiteAdapter {
 
     /** 目次を読まずに話数だけ軽く調べる方法があれば使う（なければ null） */
     suspend fun fetchEpisodeCount(ref: WorkRef): Int? = null
+
+    /**
+     * 何作品かの話数をまとめて軽く調べる（カテゴリごとの更新確認で使う）。分かった作品だけを返す。
+     * まとめて聞ける API があるサイト（なろう）は上書きして、問い合わせを1回にまとめる
+     */
+    suspend fun fetchEpisodeCounts(refs: List<WorkRef>): Map<WorkRef, Int> =
+        refs.mapNotNull { r -> fetchEpisodeCount(r)?.let { r to it } }.toMap()
 
     /** 更新を確かめる意味があるか（青空文庫・Project Gutenberg のように、完結した作品だけのサイトは false） */
     val canCheckUpdates: Boolean get() = true

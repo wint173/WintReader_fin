@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.graphics.Bitmap
 import android.webkit.CookieManager
+import android.view.ViewGroup
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebResourceRequest
@@ -213,12 +214,16 @@ fun BrowserScreen(
         // デバッグ版では PC の Chrome（chrome://inspect）から中を調べられるようにする
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         WebView(context).apply {
+            // 大きさを「親いっぱい」と明示する。AndroidView の既定（WRAP_CONTENT）のままだと、
+            // WebView はページの 100vh / 100dvh を 0 にしてしまい、なろうのランキング一覧など
+            // 画面の高さで大きさを決める「かぶせるメニュー」が高さ 0 で見えなくなる
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setBackgroundColor(surfaceArgb)
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            // Chrome と同じように、ページの viewport の指定どおりに組む（なろうのランキングの横から出るメニューなど）
+            // Chrome と同じように、ページの viewport の指定どおりに組む
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
             webViewClient = object : WebViewClient() {

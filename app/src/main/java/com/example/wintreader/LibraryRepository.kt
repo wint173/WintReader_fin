@@ -9,6 +9,18 @@ import kotlinx.coroutines.flow.Flow
 /** 元サイトの目次から消えた話のタイトルの頭に付ける印 */
 const val REMOVED_MARK = "［元サイトで削除］"
 
+/**
+ * まとめて更新を確かめた結果。
+ * checked = 確かめた作品数、notSupported = 更新確認しないサイトの作品数（青空文庫など）、
+ * updated = 新しい話があった作品と増えた話数、failed = 確かめられなかった作品とその理由
+ */
+data class UpdateCheckResult(
+    val checked: Int,
+    val notSupported: Int,
+    val updated: List<Pair<NovelEntity, Int>>,
+    val failed: List<Pair<NovelEntity, String>>,
+)
+
 class LibraryRepository(
     private val db: AppDatabase,
     private val chapterStore: ChapterStore,
@@ -35,16 +47,32 @@ class LibraryRepository(
 
     // ------------------------------------------------ カテゴリ
 
-    suspend fun addCategory(name: String): Long {
-        val order = (db.categories().list().maxOfOrNull { it.displayOrder } ?: -1) + 1
-        return db.categories().insert(CategoryEntity(name = name, displayOrder = order))
+    /** カテゴリを足す。parentId を渡すと、そのカテゴリの中のサブカテゴリになる（同じ親の中で最後に並ぶ） */
+    suspend fun addCategory(name: String, parentId: Long? = null): Long {
+        val siblings = db.categories().list().filter { it.parentId == parentId }
+        val order = (siblings.maxOfOrNull { it.displayOrder } ?: -1) + 1
+        return db.categories().insert(CategoryEntity(name = name, displayOrder = order, parentId = parentId))
     }
 
     suspend fun updateCategory(category: CategoryEntity) = db.categories().update(category)
 
-    /** カテゴリを消す。中の作品は未分類に戻す */
+    /**
+     * カテゴリを消す。
+     * サブカテゴリなら、中の作品は親のカテゴリへ移す。
+     * いちばん上のカテゴリなら、サブカテゴリもまとめて消し、中の作品はすべて未分類に戻す
+     */
     suspend fun deleteCategory(id: Long) {
-        db.novels().clearCategory(id)
+        val category = db.categories().list().firstOrNull { it.id == id } ?: return
+        val parentId = category.parentId
+        if (parentId != null) {
+            db.novels().moveCategory(id, parentId)
+        } else {
+            db.categories().children(id).forEach { child ->
+                db.novels().clearCategory(child.id)
+                db.categories().delete(child.id)
+            }
+            db.novels().clearCategory(id)
+        }
         db.categories().delete(id)
     }
 
@@ -87,6 +115,7 @@ class LibraryRepository(
                 url = c.url,
                 order = i,
                 sectionTitle = c.sectionTitle,
+                updatedText = UpdateDate.normalize(c.updatedText),
             )
         }
         // 既読・保存済みの印は引き継ぐ（TOC-07）
@@ -147,6 +176,82 @@ class LibraryRepository(
         }
         addWork(ref)
         return liveCount(novelId) - local
+    }
+
+    /**
+     * 何作品かの更新をまとめて確かめる（カテゴリの「…」→「更新を確認」から）。
+     * 1. まとめて話数を聞けるサイト（なろう）は1回の問い合わせで話数を比べ、変わった作品だけ目次を取り直す
+     * 2. それ以外は1作品ずつ目次を取り直す。サイトが交互になる順に並べ、同じサイトに続けて行かないようにする
+     *    （同じサイトへは SiteHttp が 1 秒以上空けるので、交互にすると待ちが少ない）
+     * サイトに「混雑・制限中」と言われたら、そのサイトの残りはやめる。確認の回避はしない。
+     * onProgress は確かめ終わった作品の数を知らせる。止めるときは呼び出し側のコルーチンを取り消す
+     */
+    suspend fun checkUpdatesFor(
+        novelIds: List<String>,
+        onProgress: (done: Int, total: Int) -> Unit,
+    ): UpdateCheckResult {
+        data class Target(val novel: NovelEntity, val adapter: SiteAdapter, val ref: WorkRef)
+
+        val novels = novelIds.distinct().mapNotNull { db.novels().get(it) }
+        val targets = novels.mapNotNull { n ->
+            val adapter = sites.adapterFor(n.siteId)?.takeIf { it.canCheckUpdates } ?: return@mapNotNull null
+            adapter.refOf(n.siteId, n.workId)?.let { Target(n, adapter, it) }
+        }
+        val total = targets.size
+        var done = 0
+        onProgress(done, total)
+
+        val updated = mutableListOf<Pair<NovelEntity, Int>>()
+        val failed = mutableListOf<Pair<NovelEntity, String>>()
+
+        // 1. 話数だけ軽く調べる（なろうは API にまとめて1回）
+        val remoteCounts = mutableMapOf<WorkRef, Int>()
+        targets.groupBy { it.adapter }.forEach { (adapter, list) ->
+            remoteCounts += runCatching { adapter.fetchEpisodeCounts(list.map { it.ref }) }.getOrDefault(emptyMap())
+        }
+        val toFetch = mutableListOf<Target>()
+        for (t in targets) {
+            val remote = remoteCounts[t.ref]
+            if (remote != null && remote == liveCount(t.novel.id)) {
+                onProgress(++done, total)
+            } else {
+                toFetch += t
+            }
+        }
+
+        // 2. 目次を取り直す。サイトごとの列から1つずつ順に取り、サイトが交互になるようにする
+        val queues = toFetch.groupBy { it.ref.siteId }.values.map { ArrayDeque(it) }
+        val blockedSites = mutableSetOf<String>()
+        while (queues.any { it.isNotEmpty() }) {
+            for (q in queues) {
+                val t = q.removeFirstOrNull() ?: continue
+                if (t.ref.siteId in blockedSites) {
+                    failed += t.novel to "サイトが混雑・制限中のため確認を見送りました"
+                    onProgress(++done, total)
+                    continue
+                }
+                try {
+                    val before = liveCount(t.novel.id)
+                    addWork(t.ref)
+                    val added = liveCount(t.novel.id) - before
+                    if (added > 0) updated += t.novel to added
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: SiteBusyException) {
+                    blockedSites += t.ref.siteId
+                    failed += t.novel to (e.message ?: "サイトが混雑しています")
+                } catch (e: Exception) {
+                    failed += t.novel to (e.message ?: "確認できませんでした")
+                }
+                onProgress(++done, total)
+            }
+        }
+        return UpdateCheckResult(
+            checked = total,
+            notSupported = novels.size - total,
+            updated = updated,
+            failed = failed,
+        )
     }
 
     /** 目次を取り直す（目次画面の「更新確認」・話の端の更新確認から。LIB-15） */

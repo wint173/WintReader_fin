@@ -172,6 +172,14 @@ class SettingsStore(private val context: Context) {
         context.settingsDataStore.edit { it[keyLibraryFullTitles] = on }
     }
 
+    // 目次に各話の更新日を出すか（目次の右上「…」で切り替える）
+    private val keyTocShowDates = booleanPreferencesKey("toc_show_dates")
+    val tocShowDates: Flow<Boolean> = context.settingsDataStore.data.map { it[keyTocShowDates] ?: false }
+
+    suspend fun saveTocShowDates(on: Boolean) {
+        context.settingsDataStore.edit { it[keyTocShowDates] = on }
+    }
+
     val librarySort: Flow<SortMode> = context.settingsDataStore.data.map { p ->
         p[keyLibrarySort]?.let { runCatching { SortMode.valueOf(it) }.getOrNull() } ?: SortMode.RECENT
     }
