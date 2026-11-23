@@ -13,7 +13,8 @@
  *
  * Kotlin へ通知するもの（window.ReaderBridge, @JavascriptInterface）:
  *   onReady(totalPages)
- *   onPageChanged(page, totalPages, block, offset)   page は 1 始まり
+ *   onPageChanged(page, totalPages, block, offset, endVisible)
+ *                                                    page は 1 始まり。endVisible = 本文の最後の行が画面に見えている（既読の判定に使う）
  *   onEdge(direction)                                "end" | "start"
  *
  * 読書位置 {block, offset}:
@@ -25,8 +26,9 @@
 
   var bridge = window.ReaderBridge || {
     onReady: function (t) { console.log("onReady", t); },
-    onPageChanged: function (p, t, b, o) { console.log("onPageChanged", p, t, b, o); },
-    onEdge: function (d) { console.log("onEdge", d); }
+    onPageChanged: function (p, t, b, o, e) { console.log("onPageChanged", p, t, b, o, e); },
+    onEdge: function (d) { console.log("onEdge", d); },
+    onScrolling: function (on) { console.log("onScrolling", on); }
   };
 
   var DEFAULT_SETTINGS = {
@@ -1034,14 +1036,47 @@
     var page = state.mode === "scroll"
       ? Math.floor(viewport.scrollTop / pageHeight()) + 1
       : state.page + 1;
-    bridge.onPageChanged(page, state.totalPages, state.pos.block, state.pos.offset);
+    // スクロール：いちばん下まで来たら最後のページとして数える
+    // （上の式だと、話の長さが画面の高さちょうどの倍数でない限り、最後のページに届かない）
+    if (state.mode === "scroll" && atScrollBottom()) page = state.totalPages;
+    bridge.onPageChanged(page, state.totalPages, state.pos.block, state.pos.offset, lastTextVisible());
+  }
+
+  /**
+   * 本文の最後の行が今の画面に見えているか（既読にする目安）。
+   * 話の終わりの空行は数えない（空行のために、もう一度めくったりスクロールしたりしなくてよいように）
+   */
+  function lastTextVisible() {
+    var last = null;
+    for (var i = state.blocks.length - 1; i >= 0; i--) {
+      if (state.blocks[i].className !== "blank") { last = state.blocks[i]; break; }
+    }
+    if (!last) return true;
+    var rects = last.getClientRects();
+    if (!rects.length) return false;
+    var r = rects[rects.length - 1];
+    if (state.mode === "scroll") return r.bottom <= viewport.getBoundingClientRect().bottom + 1;
+    return pageOfX(r.left + 1) <= state.page;
   }
 
   var scrollTimer = null;
+  // 指やはずみ（慣性）で本文が動いている間は Kotlin に知らせる。
+  // 動いている最中に画面に触れると、その指は「止めるため」のもので、タップ（メニュー）とは数えない（ReaderWebView.kt）
+  var scrolling = false;
+  function setScrolling(on) {
+    if (scrolling === on) return;
+    scrolling = on;
+    if (bridge.onScrolling) bridge.onScrolling(on);
+  }
+
   viewport.addEventListener("scroll", function () {
     if (state.mode !== "scroll") return;
+    // 自動スクロールで動いているときは知らせない（タップで止めたりメニューを出したりできるように）
+    var autoMoving = auto && auto.kind === "scroll" && auto.pausedUntil !== Infinity;
+    if (!autoMoving) setScrolling(true);
     clearTimeout(scrollTimer);
     scrollTimer = setTimeout(function () {
+      setScrolling(false);
       state.pos = getCurrentPosition();
       report();
     }, 150);

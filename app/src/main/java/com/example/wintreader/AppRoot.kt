@@ -379,12 +379,12 @@ private fun ReaderRoute(novelId: String, onClose: () -> Unit, onOpenNovel: (Stri
                         prefs = newPrefs
                         scope.launch { container.settingsStore.save(newPrefs) }
                     },
-                    onPositionChanged = { pos, page, total ->
+                    onPositionChanged = { pos, page, total, endVisible ->
                         lastPosition = pos
                         scope.launch {
                             repo.savePosition(novelId, o.chapterId, pos)
-                            // 最後のページまで読んだら既読にする
-                            if (page >= total) repo.markRead(novelId, o.chapterId)
+                            // 本文の最後の行が画面に出たら既読にする（次の話へ進もうとしなくてよい）
+                            if (endVisible || page >= total) repo.markRead(novelId, o.chapterId)
                         }
                     },
                     onEdge = { direction -> moveChapter(direction) },

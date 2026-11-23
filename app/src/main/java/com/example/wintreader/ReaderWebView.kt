@@ -163,12 +163,29 @@ class ReaderController {
 /** reader.js からの通知を受け取る。JavaScript のスレッドから呼ばれるのでメインスレッドへ渡す */
 class ReaderBridge(
     private val onReadyCallback: (totalPages: Int) -> Unit,
-    private val onPageChangedCallback: (page: Int, totalPages: Int, position: ReadingPosition) -> Unit,
+    /** endVisible = 本文の最後の行が画面に見えている（既読にする目安） */
+    private val onPageChangedCallback: (page: Int, totalPages: Int, position: ReadingPosition, endVisible: Boolean) -> Unit,
     private val onEdgeCallback: (direction: String) -> Unit,
     /** 自動スクロールが話の終わりで止まったとき */
     private val onAutoStopCallback: () -> Unit = {},
 ) {
     private val main = Handler(Looper.getMainLooper())
+
+    /**
+     * スクロール操作で、指やはずみで本文が動いているか（自動スクロールは含まない）。
+     * タッチの判定でいちばん新しい値を見たいので、メインスレッドへ回さず直接書く
+     */
+    @Volatile var scrolling = false
+        private set
+    /** 動きが止まった時刻（SystemClock.uptimeMillis） */
+    @Volatile var scrollStoppedAt = 0L
+        private set
+
+    @JavascriptInterface
+    fun onScrolling(on: Boolean) {
+        scrolling = on
+        if (!on) scrollStoppedAt = android.os.SystemClock.uptimeMillis()
+    }
 
     @JavascriptInterface
     fun onReady(totalPages: Int) {
@@ -176,8 +193,8 @@ class ReaderBridge(
     }
 
     @JavascriptInterface
-    fun onPageChanged(page: Int, totalPages: Int, block: Int, offset: Int) {
-        main.post { onPageChangedCallback(page, totalPages, ReadingPosition(block, offset)) }
+    fun onPageChanged(page: Int, totalPages: Int, block: Int, offset: Int, endVisible: Boolean) {
+        main.post { onPageChangedCallback(page, totalPages, ReadingPosition(block, offset), endVisible) }
     }
 
     @JavascriptInterface
@@ -192,6 +209,9 @@ class ReaderBridge(
 }
 
 private const val READER_URL = "https://appassets.androidplatform.net/assets/reader/reader.html"
+
+/** スクロールが止まったと知らせが来てから、この時間までに触れた指も「止める指」とみなす（ミリ秒） */
+private const val SCROLL_SETTLE_MS = 100L
 
 /**
  * 本文表示用の WebView を作る。
@@ -250,10 +270,15 @@ fun createReaderWebView(
         }
     }
 
+    // スクロール操作で、本文が動いている最中（はずみで流れている間）に触れた指は、
+    // 動きを止めるためのもの。離してもタップとは数えない（メニューが勝手に出ないように）
+    var tapIgnored = false
+
     val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean = true
 
         override fun onSingleTapUp(e: MotionEvent): Boolean {
+            if (tapIgnored) return true
             val w = webView.width.toFloat()
             val zone = when {
                 e.x < w / 3f -> TapZone.LEFT
@@ -266,6 +291,13 @@ fun createReaderWebView(
     })
 
     webView.setOnTouchListener { _, event ->
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            tapIgnored = currentMode() == ReadingMode.SCROLL && (
+                bridge.scrolling ||
+                    // 止まったと知らせが来た直後（知らせは最後の動きから 0.15 秒後に来る）も、止める指とみなす
+                    android.os.SystemClock.uptimeMillis() - bridge.scrollStoppedAt < SCROLL_SETTLE_MS
+                )
+        }
         detector.onTouchEvent(event)
         // タップモード：WebView にタッチを渡さない（勝手にスクロールさせない）
         // スクロールモード：WebView にも渡してスクロールさせる

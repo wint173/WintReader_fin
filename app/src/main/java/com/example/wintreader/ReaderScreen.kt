@@ -97,7 +97,8 @@ fun ReaderScreen(
     prevTitle: String?,
     nextTitle: String?,
     onPrefsChange: (ReaderPrefs) -> Unit,
-    onPositionChanged: (position: ReadingPosition, page: Int, totalPages: Int) -> Unit,
+    /** endVisible = 本文の最後の行が画面に見えている（このとき既読にする） */
+    onPositionChanged: (position: ReadingPosition, page: Int, totalPages: Int, endVisible: Boolean) -> Unit,
     onEdge: (String) -> Unit,
     onBack: () -> Unit,
     onOpenToc: () -> Unit,
@@ -184,11 +185,11 @@ fun ReaderScreen(
     val bridge = remember {
         ReaderBridge(
             onReadyCallback = { total -> totalPages = total },
-            onPageChangedCallback = { p, total, pos ->
+            onPageChangedCallback = { p, total, pos, endVisible ->
                 page = p
                 totalPages = total
                 position = pos
-                positionCallback(pos, p, total)
+                positionCallback(pos, p, total, endVisible)
             },
             onEdgeCallback = { direction -> edgeCallback(direction) },
             onAutoStopCallback = { onAutoStopped[0]?.invoke() },
